@@ -589,6 +589,34 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       header,#stats,#summary,#fbar,#grid{padding-left:14px;padding-right:14px;}
     }
     @media(max-width:580px){#stats{grid-template-columns:repeat(2,1fr);}}
+
+    /* ── Mobile ─────────────────────────────────────── */
+    @media(max-width:600px){
+      /* Header: stack into 2 rows */
+      header{flex-direction:column;align-items:stretch;gap:8px;padding:10px 14px;}
+      .hl{justify-content:space-between;}
+      .hr{justify-content:space-between;flex-wrap:wrap;gap:6px;}
+      /* Hide timestamp on mobile — saves space */
+      #upd{display:none;}
+      /* Language buttons: smaller, fit in one row */
+      .langbar{flex:1;}
+      .langbtn{flex:1;padding:5px 4px;font-size:10px;min-width:0;}
+      #refbtn{padding:5px 12px;font-size:11px;}
+      #live{font-size:10px;padding:3px 7px;}
+      /* Cards full width */
+      #grid{grid-template-columns:1fr;padding:0 10px 24px;}
+      /* Stats 2 col */
+      #stats{grid-template-columns:repeat(2,1fr);padding:12px 10px 0;}
+      /* Summary single col */
+      .sum-grid{grid-template-columns:1fr!important;}
+      .sum-cell{border-right:none;border-bottom:1px solid var(--border);}
+      .sum-cell:last-child{border-bottom:none;}
+      /* Filter bar wraps nicely */
+      #fbar{padding:10px 10px;gap:5px;}
+      .chip{font-size:11px;padding:4px 9px;}
+      /* Summary section padding */
+      #summary{padding:12px 10px 0;}
+    }
   </style>
 </head>
 <body>
