@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
 Global Market News Dashboard
-─────────────────────────────
-Run:   python3 news-server.py
-Then:  browser opens at http://localhost:8080
-Stop:  Ctrl+C
+
 """
 
 import http.server
