@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Global Market News Dashboard
-
-"""
-
 import http.server
 import urllib.request
 import urllib.parse
@@ -67,6 +61,45 @@ REGIONS = [
         ]
     },
     {
+        'id': 'war', 'flag': '🔥', 'name': 'War Zone',
+        'sources': [
+            {'name': 'Times of Israel', 'urls': [
+                'https://www.timesofisrael.com/feed/',
+                'https://www.timesofisrael.com/blogs/feed/',
+            ]},
+            {'name': 'Al Jazeera', 'urls': [
+                'https://www.aljazeera.com/xml/rss/all.xml',
+                'https://www.aljazeera.com/rss/all.xml',
+            ]},
+            {'name': 'Middle East Eye', 'urls': [
+                'https://www.middleeasteye.net/rss',
+                'https://www.middleeasteye.net/rss.xml',
+            ]},
+            {'name': 'Press TV', 'urls': [
+                'https://www.presstv.ir/homepagearticles.rss',
+                'https://www.presstv.ir/rss.xml',
+                'https://www.presstv.ir/rss',
+            ]},
+        ]
+    },
+    {
+        'id': 'europe', 'flag': '🇪🇺', 'name': 'Europe',
+        'sources': [
+            {'name': 'BBC Business', 'urls': [
+                'https://feeds.bbci.co.uk/news/business/rss.xml',
+                'https://feeds.bbci.co.uk/news/rss.xml',
+            ]},
+            {'name': 'DW Business',  'urls': [
+                'https://rss.dw.com/rdf/rss-en-bus',
+                'https://rss.dw.com/rdf/rss-en-all',
+            ]},
+            {'name': 'The Guardian', 'urls': [
+                'https://www.theguardian.com/uk/business/rss',
+                'https://www.theguardian.com/business/rss',
+            ]},
+        ]
+    },
+    {
         'id': 'korea', 'flag': '🇰🇷', 'name': 'South Korea',
         'sources': [
             {'name': 'Korea JoongAng', 'urls': [
@@ -88,14 +121,8 @@ REGIONS = [
         ]
     },
     {
-        'id': 'china', 'flag': '🇨🇳', 'name': 'China',
+        'id': 'china', 'flag': '🇨🇳🇯🇵', 'name': 'China & Japan',
         'sources': [
-            {'name': '凤凰财经 (ifeng Finance)', 'translate': 'zh', 'urls': [
-                'http://rss.ifeng.com/finance.xml',
-                'https://rss.ifeng.com/finance.xml',
-                'http://rss.ifeng.com/caijing.xml',
-                'http://rss.ifeng.com/stock.xml',
-            ]},
             {'name': 'SCMP', 'urls': [
                 'https://www.scmp.com/rss/91/feed',
                 'https://www.scmp.com/rss/4/feed',
@@ -105,28 +132,6 @@ REGIONS = [
                 'https://asia.nikkei.com/rss/feed/nar',
                 'https://asia.nikkei.com/rss/feed/china',
                 'https://asia.nikkei.com/rss',
-            ]},
-            {'name': '澎湃财经 (The Paper)', 'translate': 'zh', 'urls': [
-                'https://www.thepaper.cn/rss_channel.jsp?channel_id=25951',
-                'https://www.thepaper.cn/rss_channel.jsp?channel_id=14492',
-                'https://www.thepaper.cn/rss_channel.jsp',
-            ]},
-        ]
-    },
-    {
-        'id': 'europe', 'flag': '🇪🇺', 'name': 'Europe',
-        'sources': [
-            {'name': 'BBC Business', 'urls': [
-                'https://feeds.bbci.co.uk/news/business/rss.xml',
-                'https://feeds.bbci.co.uk/news/rss.xml',
-            ]},
-            {'name': 'DW Business',  'urls': [
-                'https://rss.dw.com/rdf/rss-en-bus',
-                'https://rss.dw.com/rdf/rss-en-all',
-            ]},
-            {'name': 'The Guardian', 'urls': [
-                'https://www.theguardian.com/uk/business/rss',
-                'https://www.theguardian.com/business/rss',
             ]},
         ]
     },
@@ -193,51 +198,67 @@ def needs_translation(text):
 def translate_headline(text, src_lang='ko'):
     """Translate a single headline to English using the free MyMemory API."""
     try:
-        q = urllib.parse.quote(text[:400])
-        url = f'https://api.mymemory.translated.net/get?q={q}&langpair={src_lang}|en'
+        # Google Translate unofficial API — no key, no daily limit
+        gt_lang = {'ko': 'ko', 'zh': 'zh-CN'}.get(src_lang, src_lang)
+        q = urllib.parse.quote(text[:500])
+        url = (f'https://translate.googleapis.com/translate_a/single'
+               f'?client=gtx&sl={gt_lang}&tl=en&dt=t&q={q}')
         req = urllib.request.Request(url, headers={'User-Agent': HEADERS['User-Agent']})
         with urllib.request.urlopen(req, timeout=6, context=SSL_CTX) as resp:
             data = json.loads(resp.read())
-        translated = data.get('responseData', {}).get('translatedText', '')
-        # MyMemory returns the original if it can't translate
-        if translated and translated.upper() != text.upper():
+        # Response: [[[translated, original, ...], ...], ...]
+        translated = ''.join(seg[0] for seg in (data[0] or []) if seg[0]).strip()
+        if translated:
             return translated
     except Exception:
         pass
     return text  # fallback: return original
 
 def translate_rss_titles(raw, src_lang='ko'):
-    """Translate all item <title> fields in parallel, then substitute back."""
+    """Translate all item <title> and <description> fields in parallel."""
     xml = raw.decode('utf-8', 'ignore')
 
-    # 1. Collect every item title that needs translation
-    item_title_re = re.compile(
-        r'(<item>.*?<title>)(.*?)(</title>.*?</item>)', re.DOTALL
+    # Match both <title> and <description> inside <item> blocks
+    field_re = re.compile(
+        r'(<(?:title|description)>)(.*?)(</(?:title|description)>)',
+        re.DOTALL
     )
-    matches = list(item_title_re.finditer(xml))
 
-    # Extract originals, unwrapping CDATA
-    originals = []
-    for m in matches:
-        inner = m.group(2)
-        cdata = re.match(r'<!\[CDATA\[(.*?)\]\]>', inner.strip(), re.DOTALL)
-        originals.append(cdata.group(1).strip() if cdata else inner.strip())
+    # Only operate inside <item> blocks
+    item_re = re.compile(r'<item>.*?</item>', re.DOTALL)
 
-    # 2. Translate all in parallel (one thread per headline)
-    def maybe_translate(text):
-        if text and needs_translation(text):
-            return translate_headline(text, src_lang)
-        return text
+    def strip_tags(text):
+        """Remove HTML tags and decode basic entities from text."""
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&nbsp;', ' ')
+        return ' '.join(text.split()).strip()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as ex:
-        translated = list(ex.map(maybe_translate, originals))
+    def translate_item(item_xml):
+        matches = list(field_re.finditer(item_xml))
+        originals = []
+        for m in matches:
+            inner = m.group(2)
+            cdata = re.match(r'<!\[CDATA\[(.*?)\]\]>', inner.strip(), re.DOTALL)
+            raw_text = cdata.group(1).strip() if cdata else inner.strip()
+            # Strip HTML tags so Google Translate gets clean text
+            originals.append(strip_tags(raw_text))
 
-    # 3. Substitute back, walking matches in reverse so offsets stay valid
-    for m, t in zip(reversed(matches), reversed(translated)):
-        replacement = f'{m.group(1)}<![CDATA[{t}]]>{m.group(3)}'
-        xml = xml[:m.start()] + replacement + xml[m.end():]
+        def maybe_translate(text):
+            if text and needs_translation(text):
+                return translate_headline(text, src_lang)
+            return text
 
-    return xml.encode('utf-8')
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as ex:
+            translated = list(ex.map(maybe_translate, originals))
+
+        for m, t in zip(reversed(matches), reversed(translated)):
+            replacement = f'{m.group(1)}<![CDATA[{t}]]>{m.group(3)}'
+            item_xml = item_xml[:m.start()] + replacement + item_xml[m.end():]
+        return item_xml
+
+    # Replace each item block with its translated version
+    result = item_re.sub(lambda m: translate_item(m.group(0)), xml)
+    return result.encode('utf-8')
 
 def scrape_headlines(raw, source_name, base_url):
     """Extract article headlines from an HTML page and return RSS XML bytes."""
@@ -619,10 +640,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <header>
   <div class="hl">
-    <div class="logo">📊</div>
+    <div class="logo">🌐</div>
     <div>
       <h1>Global Market News Dashboard</h1>
-      <p>Live RSS · USA · Korea · China · Europe · LATAM</p>
+      <p>Live RSS · USA · Korea · China · Europe · LATAM · Middle East</p>
     </div>
   </div>
   <div class="hr">
@@ -643,9 +664,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 <div id="stats">
   <div class="sc"><span class="sf">🇺🇸</span><div><div class="sn" id="s-usa">–</div><div class="sl">USA</div></div></div>
-  <div class="sc"><span class="sf">🇰🇷</span><div><div class="sn" id="s-korea">–</div><div class="sl">Korea</div></div></div>
-  <div class="sc"><span class="sf">🇨🇳</span><div><div class="sn" id="s-china">–</div><div class="sl">China</div></div></div>
+  <div class="sc"><span class="sf">🔥</span><div><div class="sn" id="s-war">–</div><div class="sl">War Zone</div></div></div>
   <div class="sc"><span class="sf">🇪🇺</span><div><div class="sn" id="s-europe">–</div><div class="sl">Europe</div></div></div>
+  <div class="sc"><span class="sf">🇰🇷</span><div><div class="sn" id="s-korea">–</div><div class="sl">Korea</div></div></div>
+  <div class="sc"><span class="sf">🇨🇳🇯🇵</span><div><div class="sn" id="s-china">–</div><div class="sl">China & Japan</div></div></div>
   <div class="sc"><span class="sf">🌎</span><div><div class="sn" id="s-latam">–</div><div class="sl">LATAM</div></div></div>
 </div>
 <div id="summary">
@@ -663,9 +685,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <span class="flbl">Region:</span>
   <button class="chip all on" onclick="setFilter('all',this)">All</button>
   <button class="chip" onclick="setFilter('usa',this)">🇺🇸 USA</button>
-  <button class="chip" onclick="setFilter('korea',this)">🇰🇷 Korea</button>
-  <button class="chip" onclick="setFilter('china',this)">🇨🇳 China</button>
+  <button class="chip" onclick="setFilter('war',this)">🔥 War Zone</button>
   <button class="chip" onclick="setFilter('europe',this)">🇪🇺 Europe</button>
+  <button class="chip" onclick="setFilter('korea',this)">🇰🇷 Korea</button>
+  <button class="chip" onclick="setFilter('china',this)">🇨🇳🇯🇵 China & Japan</button>
   <button class="chip" onclick="setFilter('latam',this)">🌎 LATAM</button>
   <div class="gap"></div>
   <select id="sortsel" onchange="renderAll()">
