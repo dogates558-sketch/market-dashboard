@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+"""
+Global Market News Dashboard
+
+"""
+
 import http.server
 import urllib.request
 import urllib.parse
@@ -695,6 +701,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <option value="newest">Newest first</option>
     <option value="oldest">Oldest first</option>
   </select>
+  <button onclick="exportMiroFish()" style="padding:5px 13px;border-radius:8px;font-size:12px;font-weight:600;border:1.5px solid #7c3aed;background:#7c3aed;color:#fff;cursor:pointer;">🐟 Export to MiroFish</button>
 </div>
 <div id="grid"></div>
 <div id="ov" onclick="if(event.target===this)closeMod()">
@@ -749,9 +756,41 @@ async function translateAll(toLang){
   await Promise.all([...toXlate].map(t=>translateText(t,toLang)));
 }
 
+function hasNonLatin(text){
+  return text && /[\uAC00-\uD7A3\u3400-\u9FFF\u4E00-\u9FFF]/.test(text);
+}
 function getT(text){
-  if(!text||currentLang==='en') return text;
+  if(!text) return text;
+  if(currentLang==='en'){
+    // If text is Korean/Chinese and we have a cached English translation, use it
+    if(hasNonLatin(text)) return transCache['en|'+text]||text;
+    return text;
+  }
   return transCache[currentLang+'|'+text]||text;
+}
+async function autoTranslateNative(){
+  // After load, find any Korean/Chinese titles/descriptions and translate to English
+  const toXlate=new Set();
+  REGIONS.forEach(r=>{
+    Object.values(data[r.id]||{}).forEach(sd=>{
+      (sd.articles||[]).forEach(a=>{
+        if(hasNonLatin(a.title)&&!transCache['en|'+a.title]) toXlate.add(a.title);
+        if(a.description&&hasNonLatin(a.description)&&!transCache['en|'+a.description]) toXlate.add(a.description);
+      });
+    });
+  });
+  if(!toXlate.size) return;
+  await Promise.all([...toXlate].map(async t=>{
+    try{
+      const url='https://translate.googleapis.com/translate_a/single'
+        +'?client=gtx&sl=auto&tl=en&dt=t&q='+encodeURIComponent(t.slice(0,500));
+      const r=await fetch(url);
+      const d=await r.json();
+      const translated=(d[0]||[]).map(seg=>seg[0]||'').join('').trim();
+      if(translated) transCache['en|'+t]=translated;
+    }catch(e){}
+  }));
+  renderAll();renderSummaries();
 }
 
 async function setLang(lang, el){
@@ -935,6 +974,7 @@ async function loadAll(){
   updateStats();renderAll();renderSummaries();
   document.getElementById('upd').textContent='Updated '+new Date().toLocaleTimeString();
   btn.disabled=false;btn.textContent='↻ Refresh';
+  autoTranslateNative();
 }
 
 function renderSkeleton(){
@@ -1078,6 +1118,55 @@ function esc(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+function exportMiroFish(){
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0,10);
+  const timeStr = now.toLocaleTimeString();
+  let lines = [];
+  lines.push('# Global News Seed — MiroFish Simulation Input');
+  lines.push('# Generated: ' + dateStr + ' ' + timeStr);
+  lines.push('# Source: Global Pulse Dashboard');
+  lines.push('');
+  lines.push('## INSTRUCTIONS FOR MIROFISH');
+  lines.push('Upload this document as seed material. Ask MiroFish to simulate');
+  lines.push('how these global news events interact and predict near-term outcomes');
+  lines.push('in financial markets, geopolitics, and public sentiment.');
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  REGIONS.forEach(region => {
+    const rd = data[region.id] || {};
+    const arts = [];
+    Object.entries(rd).forEach(([srcName, sd]) => {
+      (sd.articles || []).forEach(a => {
+        const t = (getT(a.title)||'').trim();
+        const d = (getT(a.description)||'').trim();
+        if(t) arts.push({title:t, desc:d, src:srcName, date:a.publishedAt});
+      });
+    });
+    if(!arts.length) return;
+    arts.sort((a,b)=>new Date(b.date)-new Date(a.date));
+    lines.push('## ' + region.flag + ' ' + region.name.toUpperCase());
+    arts.slice(0,10).forEach((a,i)=>{
+      lines.push((i+1)+'. ' + a.title);
+      if(a.desc && a.desc !== a.title) lines.push('   > ' + a.desc.slice(0,200));
+      lines.push('   [Source: ' + a.src + (a.date ? ' | ' + new Date(a.date).toLocaleDateString() : '') + ']');
+      lines.push('');
+    });
+    lines.push('---');
+    lines.push('');
+  });
+  const text = lines.join('\n');
+  // Download as .txt
+  const blob = new Blob([text], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'mirofish-seed-' + dateStr + '.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 loadAll();
 </script>
 </body>
