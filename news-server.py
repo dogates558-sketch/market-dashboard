@@ -168,6 +168,122 @@ REGIONS = [
 _cache = {}
 _cache_lock = threading.Lock()
 
+# ── Multi-currency 10Y yield OHLC cache (Yahoo Finance) ────────
+_yields_cache = {'data': None, 'ts': 0}
+_yields_lock  = threading.Lock()
+YIELDS_TTL    = 3600
+
+# ── 10Y Yield data — multi-source (no API keys, works on Render) ─────────────
+import datetime as _dt
+
+def _make_ohlc(close_pts):
+    """Convert [(date_str, close), …] → synthetic OHLC candles.
+    open = previous close; high/low = directional range."""
+    rows, prev = [], None
+    for ds, c in sorted(close_pts, key=lambda x: x[0]):
+        o = prev if prev is not None else c
+        rows.append({'date': ds, 'o': round(o,4), 'h': round(max(o,c),4),
+                     'l': round(min(o,c),4), 'c': round(c,4)})
+        prev = c
+    return rows
+
+def _fred(series_id, days=400):
+    """Fetch close series from FRED. Uses cosd= to avoid downloading 60yr history."""
+    start = (_dt.date.today() - _dt.timedelta(days=days)).strftime('%Y-%m-%d')
+    # cosd filters server-side so only recent data is downloaded
+    url = (f'https://fred.stlouisfed.org/graph/fredgraph.csv'
+           f'?id={series_id}&cosd={start}')
+    req = urllib.request.Request(url, headers={'User-Agent': HEADERS['User-Agent']})
+    with urllib.request.urlopen(req, timeout=30, context=SSL_CTX) as r:
+        lines = r.read().decode().strip().splitlines()
+    pts = []
+    for line in lines[1:]:
+        parts = line.split(',')
+        if len(parts) < 2: continue
+        ds, vs = parts[0].strip(), parts[1].strip()
+        if vs in ('.', ''): continue
+        try: pts.append((ds, float(vs)))
+        except ValueError: pass
+    return pts
+
+def _ecb_eur(days=400):
+    """Fetch EUR 10Y yield from ECB Data Warehouse (daily)."""
+    start = (_dt.date.today() - _dt.timedelta(days=days)).strftime('%Y-%m-%d')
+    url = ('https://data-api.ecb.europa.eu/service/data/YC/'
+           'B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y'
+           f'?format=csvdata&startPeriod={start}')
+    req = urllib.request.Request(url, headers={
+        'User-Agent': HEADERS['User-Agent'], 'Accept': 'text/csv'})
+    with urllib.request.urlopen(req, timeout=15, context=SSL_CTX) as r:
+        lines = r.read().decode().strip().splitlines()
+    if not lines: return []
+    hdr = lines[0].split(',')
+    try: di, vi = hdr.index('TIME_PERIOD'), hdr.index('OBS_VALUE')
+    except ValueError: return []
+    pts = []
+    for line in lines[1:]:
+        p = line.split(',')
+        if len(p) <= max(di, vi): continue
+        ds, vs = p[di].strip(), p[vi].strip()
+        if not vs: continue
+        try: pts.append((ds, float(vs)))
+        except ValueError: pass
+    return pts
+
+def _boc_cad(days=400):
+    """Fetch CAD 10Y yield from Bank of Canada Valet API (daily).
+    Series BD.CDN.10YR.DED = Government of Canada benchmark bond yield, 10-year."""
+    start = (_dt.date.today() - _dt.timedelta(days=days)).strftime('%Y-%m-%d')
+    series = 'BD.CDN.10YR.DED'
+    url = (f'https://www.bankofcanada.ca/valet/observations/{series}/json'
+           f'?start_date={start}')
+    req = urllib.request.Request(url, headers={'User-Agent': HEADERS['User-Agent']})
+    with urllib.request.urlopen(req, timeout=20, context=SSL_CTX) as r:
+        data = json.loads(r.read())
+    pts = []
+    for obs in data.get('observations', []):
+        ds = obs.get('d', '')
+        v  = obs.get(series, {}).get('v')
+        if v and v not in ('', 'Bank holiday'):
+            try: pts.append((ds, float(v)))
+            except ValueError: pass
+    return pts
+
+# USD daily (FRED), EUR daily (ECB), CAD daily (BoC),
+# GBP/JPY/AUD monthly (FRED — best free fallback)
+YIELD_FETCHERS = {
+    'USD': (_fred,    'DGS10',            'FRED daily'),
+    'EUR': (_ecb_eur, None,               'ECB daily'),
+    'GBP': (_fred,    'IRLTLT01GBM156N',  'FRED monthly'),
+    'JPY': (_fred,    'IRLTLT01JPM156N',  'FRED monthly'),
+    'CAD': (_boc_cad, None,               'BoC daily'),
+    'AUD': (_fred,    'IRLTLT01AUM156N',  'FRED monthly'),
+}
+
+def fetch_all_yields():
+    result = {}
+    for ccy, (fn, arg, label) in YIELD_FETCHERS.items():
+        try:
+            pts = fn(arg) if arg else fn()
+            rows = _make_ohlc(pts)
+            print(f'  ✅ {ccy} ({label}) → {len(rows)} pts')
+            result[ccy] = rows
+        except Exception as e:
+            print(f'  ❌ {ccy} ({label}) → {e}')
+            result[ccy] = []
+    return result
+
+def get_yields_cached():
+    with _yields_lock:
+        if _yields_cache['data'] and time.time() - _yields_cache['ts'] < YIELDS_TTL:
+            return _yields_cache['data']
+    print('Fetching 10Y yields (FRED/ECB/BoC)…')
+    data = fetch_all_yields()
+    with _yields_lock:
+        _yields_cache['data'] = data
+        _yields_cache['ts']   = time.time()
+    return data
+
 def fetch_url(url):
     """Fetch a single URL and return raw bytes. Raises on failure."""
     from urllib.parse import urlparse
@@ -463,6 +579,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Global Market News Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
@@ -505,6 +623,44 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       background:#1e293b;color:#fff;padding:8px 18px;border-radius:99px;font-size:12px;
       font-weight:600;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,.25);gap:8px;align-items:center;}
     .translating-banner.show{display:flex;}
+    /* ── Main tab bar ── */
+    #maintabs{background:var(--surface);border-bottom:1px solid var(--border);
+      padding:0 28px;display:flex;gap:4px;}
+    .mtab{padding:11px 18px;font-size:13px;font-weight:600;color:var(--muted);
+      cursor:pointer;border-bottom:2.5px solid transparent;background:none;
+      border-top:none;border-left:none;border-right:none;transition:all .15s;}
+    .mtab:hover{color:var(--accent);}
+    .mtab.on{color:var(--accent);border-bottom-color:var(--accent);}
+    /* ── Market view ── */
+    #fx-view{display:none;padding:20px 28px 36px;}
+    .mkt-title{font-size:14px;font-weight:700;color:var(--muted);
+      margin-bottom:16px;letter-spacing:.04em;}
+    .mkt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;}
+    .mkt-card{background:var(--surface);border:1px solid var(--border);
+      border-radius:var(--r);overflow:hidden;box-shadow:var(--sh);}
+    .mkt-label{padding:8px 12px 0;font-size:11px;font-weight:700;color:var(--muted);}
+    /* Rates sub-tabs */
+    .rates-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:18px;}
+    .rates-stab{padding:6px 16px;border-radius:8px;font-size:12px;font-weight:600;
+      border:1.5px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;}
+    .rates-stab.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+    .rng-btn{padding:4px 11px;border-radius:99px;font-size:11px;font-weight:700;
+      border:1.5px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;}
+    .rng-btn.on{background:var(--text);color:#fff;border-color:var(--text);}
+    .rates-gap{flex:1;}
+    .rates-note{font-size:10px;color:var(--faint);}
+    .chart-wrap{background:var(--surface);border:1px solid var(--border);
+      border-radius:var(--r);padding:18px;box-shadow:var(--sh);position:relative;height:380px;}
+    .chart-wrap canvas{max-height:340px;}
+    #rates-loading{text-align:center;padding:40px;color:var(--muted);font-size:13px;}
+    .spreads-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+    @media(max-width:700px){.spreads-grid{grid-template-columns:1fr;}}
+    @media(max-width:600px){
+      #maintabs{padding:0 10px;}
+      .mtab{padding:9px 11px;font-size:12px;}
+      #fx-view{padding:14px 10px 28px;}
+      .mkt-grid{grid-template-columns:1fr 1fr;}
+    }
     #stats{display:grid;grid-template-columns:repeat(5,1fr);gap:11px;padding:18px 28px 0;}
     .sc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
       padding:11px 13px;display:flex;align-items:center;gap:9px;box-shadow:var(--sh);}
@@ -664,6 +820,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button id="refbtn" onclick="loadAll()">↻ Refresh</button>
   </div>
 </header>
+<div id="maintabs">
+  <button class="mtab on" onclick="switchMainTab('news',this)">📰 News</button>
+  <button class="mtab" onclick="switchMainTab('fx',this)">💱 FX</button>
+</div>
 <div class="translating-banner" id="trans-banner">
   <div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div>
   Translating headlines…
@@ -704,6 +864,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <button onclick="exportMiroFish()" style="padding:5px 13px;border-radius:8px;font-size:12px;font-weight:600;border:1.5px solid #7c3aed;background:#7c3aed;color:#fff;cursor:pointer;">🐟 Export to MiroFish</button>
 </div>
 <div id="grid"></div>
+
+<!-- ── FX Tab ── -->
+<div id="fx-view">
+  <div class="rates-toolbar" style="margin-bottom:16px;">
+    <span class="mkt-title" style="margin:0">G10 FX</span>
+    <div style="flex:1"></div>
+    <button class="rng-btn on" onclick="setFXRange('1d',this)">1D</button>
+    <button class="rng-btn"    onclick="setFXRange('1m',this)">1M</button>
+    <button class="rng-btn"    onclick="setFXRange('3m',this)">3M</button>
+  </div>
+  <div class="mkt-grid" id="fx-grid"></div>
+</div>
+
 <div id="ov" onclick="if(event.target===this)closeMod()">
   <div id="mb">
     <button id="mc" onclick="closeMod()">✕</button>
@@ -1167,6 +1340,180 @@ function exportMiroFish(){
   URL.revokeObjectURL(url);
 }
 
+// ── Yield Candlestick Charts ──────────────────────────────────
+let _yieldsData   = null;
+let _yieldsLoaded = false;
+let _activeRange  = '1m';
+
+const CCY_FLAGS = {USD:'🇺🇸',EUR:'🇪🇺',GBP:'🇬🇧',JPY:'🇯🇵',CAD:'🇨🇦',AUD:'🇦🇺'};
+
+function filterOHLC(rows, range){
+  const now=new Date(), cutoff=new Date(now);
+  cutoff.setMonth(cutoff.getMonth()-({'1m':1,'3m':3,'6m':6,'1y':12}[range]||1));
+  return (rows||[]).filter(r=>new Date(r.date)>=cutoff);
+}
+
+async function loadYields(range, btn){
+  if(btn){
+    document.querySelectorAll('.rng-btn').forEach(b=>b.classList.remove('on'));
+    btn.classList.add('on');
+  }
+  if(range) _activeRange=range;
+  if(!_yieldsLoaded){
+    const ld=document.getElementById('rates-loading');
+    ld.style.display='block';
+    ld.textContent='⏳ Loading yield data from Yahoo Finance…';
+    try{
+      const resp=await fetch('/api/yields');
+      const d=await resp.json();
+      _yieldsData=d.curves;
+      _yieldsLoaded=true;
+    }catch(e){
+      ld.textContent='⚠️ Failed to load yield data. Check server logs.';
+      return;
+    }
+    ld.style.display='none';
+  }
+  renderCandleCharts();
+}
+
+function setYieldRange(range, btn){ loadYields(range, btn); }
+
+function renderCandleCharts(){
+  const grid=document.getElementById('rates-candle-grid');
+  grid.innerHTML='';
+  const CCY_ORDER=['USD','EUR','GBP','JPY','CAD','AUD'];
+  CCY_ORDER.forEach(ccy=>{
+    const rows=_yieldsData[ccy];
+    if(!rows) return;
+    const filtered=filterOHLC(rows, _activeRange);
+    if(!filtered.length) return;
+    const wrap=document.createElement('div');
+    wrap.style.cssText='background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);';
+    const divId='candle-'+ccy;
+    wrap.innerHTML=`<div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:4px">${CCY_FLAGS[ccy]} ${ccy} 10Y Treasury Yield</div><div id="${divId}" style="height:260px"></div>`;
+    grid.appendChild(wrap);
+    Plotly.newPlot(divId,[{
+      type:'candlestick',
+      x:filtered.map(r=>r.date),
+      open:filtered.map(r=>r.o),
+      high:filtered.map(r=>r.h),
+      low:filtered.map(r=>r.l),
+      close:filtered.map(r=>r.c),
+      increasing:{line:{color:'#22c55e'},fillcolor:'#22c55e'},
+      decreasing:{line:{color:'#ef4444'},fillcolor:'#ef4444'},
+      name:ccy,
+    }],{
+      margin:{t:10,r:20,b:40,l:50},
+      paper_bgcolor:'transparent',
+      plot_bgcolor:'transparent',
+      yaxis:{title:'Yield (%)',tickformat:'.2f',gridcolor:'#e2e8f0',zerolinecolor:'#e2e8f0'},
+      xaxis:{rangeslider:{visible:false},gridcolor:'#e2e8f0'},
+      showlegend:false,
+    },{responsive:true,displayModeBar:false});
+  });
+}
+
+// ── Market tab data ──────────────────────────────────────────
+// Format: [displayName, "EXCHANGE:SYMBOL"]
+const FX_PAIRS = [
+  ['EUR / USD',  'FX:EURUSD'],
+  ['GBP / USD',  'FX:GBPUSD'],
+  ['USD / JPY',  'FX:USDJPY'],
+  ['USD / CHF',  'FX:USDCHF'],
+  ['AUD / USD',  'FX:AUDUSD'],
+  ['USD / CAD',  'FX:USDCAD'],
+  ['NZD / USD',  'FX:NZDUSD'],
+  ['USD / SEK',  'FX:USDSEK'],
+  ['USD / NOK',  'FX:USDNOK'],
+  ['USD / DKK',  'FX:USDDKK'],
+];
+
+// ── FX range state ───────────────────────────────────────────
+let _fxRange = '1d';   // default: 1-day view
+// TradingView dateRange strings: "period|resolution"
+const FX_RANGE_CFG = {
+  '1d': {dateRange: '1d|60',  res: '60'},   // 1 day, 60-min candles
+  '1m': {dateRange: '1m|1D',  res: '1D'},   // 1 month, daily candles
+  '3m': {dateRange: '3m|1D',  res: '1D'},   // 3 months, daily candles
+};
+
+function buildTVChart(pair){
+  const [label, sym] = pair;
+  const {dateRange} = FX_RANGE_CFG[_fxRange] || FX_RANGE_CFG['1d'];
+  const cfg = {
+    symbols: [[label, sym + '|1D']],
+    chartOnly: false,
+    width: '100%',
+    height: 280,
+    locale: 'en',
+    colorTheme: 'light',
+    autosize: false,
+    showVolume: false,
+    showMA: false,
+    hideDateRanges: true,
+    hideMarketStatus: false,
+    hideSymbolLogo: true,
+    scalePosition: 'right',
+    scaleMode: 'Normal',
+    fontSize: '10',
+    noTimeScale: false,
+    valuesTracking: '1',
+    changeMode: 'price-and-percent',
+    chartType: 'candlesticks',
+    upColor: '#22c55e',
+    downColor: '#ef4444',
+    borderUpColor: '#22c55e',
+    borderDownColor: '#ef4444',
+    wickUpColor: '#22c55e',
+    wickDownColor: '#ef4444',
+    dateRanges: [dateRange],
+  };
+  const wrap = document.createElement('div');
+  wrap.className = 'mkt-card';
+  const container = document.createElement('div');
+  container.className = 'tradingview-widget-container';
+  container.style.height = '280px';
+  const inner = document.createElement('div');
+  inner.className = 'tradingview-widget-container__widget';
+  inner.style.height = '100%';
+  const script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-symbol-overview.js';
+  script.async = true;
+  script.textContent = JSON.stringify(cfg);
+  container.appendChild(inner);
+  container.appendChild(script);
+  wrap.appendChild(container);
+  return wrap;
+}
+
+function setFXRange(range, btn){
+  _fxRange = range;
+  document.querySelectorAll('.rng-btn').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  // Destroy and rebuild all FX charts with new range
+  const grid = document.getElementById('fx-grid');
+  grid.innerHTML = '';
+  FX_PAIRS.forEach(p => grid.appendChild(buildTVChart(p)));
+}
+
+let _currentMainTab = 'news';
+function switchMainTab(tab, btn){
+  _currentMainTab = tab;
+  document.querySelectorAll('.mtab').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  const newsEls = ['stats','summary','fbar','grid'];
+  const isNews = tab==='news';
+  newsEls.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display = isNews ? '' : 'none'; });
+  document.getElementById('trans-banner').style.display = isNews ? '' : 'none';
+  document.getElementById('fx-view').style.display = tab==='fx' ? 'block' : 'none';
+  if(tab==='fx'){
+    const grid = document.getElementById('fx-grid');
+    if(!grid.children.length) FX_PAIRS.forEach(p => grid.appendChild(buildTVChart(p)));
+  }
+}
+
 loadAll();
 </script>
 </body>
@@ -1187,6 +1534,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(content)))
             self.end_headers()
             self.wfile.write(content)
+
+        elif parsed.path == '/api/yields':
+            try:
+                curves = get_yields_cached()
+                body = json.dumps({'curves': curves}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self._err(500, str(e))
 
         elif parsed.path == '/api/feed':
             params = urllib.parse.parse_qs(parsed.query)
