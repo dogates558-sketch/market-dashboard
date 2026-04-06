@@ -1427,6 +1427,8 @@ const FX_PAIRS = [
   ['USD / SEK',  'FX:USDSEK'],
   ['USD / NOK',  'FX:USDNOK'],
   ['USD / DKK',  'FX:USDDKK'],
+  ['USD / KRW',  'FX:USDKRW'],
+  ['USD / CNH',  'FX:USDCNH'],
 ];
 
 // ── FX range state ───────────────────────────────────────────
