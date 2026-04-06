@@ -1291,7 +1291,7 @@ function esc(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
-function exportMiroFish(){
+async function exportMiroFish(){
   const now = new Date();
   const dateStr = now.toISOString().slice(0,10);
   const timeStr = now.toLocaleTimeString();
@@ -1307,6 +1307,40 @@ function exportMiroFish(){
   lines.push('');
   lines.push('---');
   lines.push('');
+
+  // ── FX Snapshot ──────────────────────────────────────────────
+  lines.push('## 💱 G10 FX SNAPSHOT (Timeframe: ' + _fxRange.toUpperCase() + ')');
+  lines.push('');
+  const FX_DISPLAY = [
+    ['EUR/USD','EUR',true], ['GBP/USD','GBP',true], ['USD/JPY','JPY',false],
+    ['USD/CHF','CHF',false], ['AUD/USD','AUD',true], ['USD/CAD','CAD',false],
+    ['NZD/USD','NZD',true],  ['USD/SEK','SEK',false], ['USD/NOK','NOK',false],
+    ['USD/DKK','DKK',false], ['USD/KRW','KRW',false], ['USD/CNH','CNY',false],
+  ];
+  try {
+    const fxResp = await fetch('https://api.frankfurter.app/latest?from=USD&to=EUR,GBP,JPY,CHF,CAD,AUD,NZD,SEK,NOK,DKK,KRW,CNY');
+    const fxData = await fxResp.json();
+    const rates = fxData.rates || {};
+    FX_DISPLAY.forEach(([label, key, inv]) => {
+      const raw = rates[key];
+      if(raw != null){
+        const dp = (key==='JPY'||key==='KRW'||key==='SEK'||key==='NOK'||key==='DKK') ? 2 : 4;
+        const val = inv ? (1/raw).toFixed(dp) : parseFloat(raw).toFixed(dp);
+        lines.push('- ' + label + ': ' + val);
+      } else {
+        lines.push('- ' + label + ': N/A');
+      }
+    });
+    lines.push('   [Source: Frankfurter / ECB | Date: ' + (fxData.date||dateStr) + ']');
+  } catch(e) {
+    FX_DISPLAY.forEach(([label]) => lines.push('- ' + label + ': data unavailable'));
+    lines.push('   [FX fetch failed — include manually if needed]');
+  }
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+
+  // ── News by Region ────────────────────────────────────────────
   REGIONS.forEach(region => {
     const rd = data[region.id] || {};
     const arts = [];
