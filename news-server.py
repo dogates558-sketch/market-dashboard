@@ -633,6 +633,21 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .mtab.on{color:var(--accent);border-bottom-color:var(--accent);}
     /* ── Market view ── */
     #fx-view{display:none;padding:20px 28px 36px;}
+    /* ── AI Outlook view ── */
+    #outlook-view{display:none;padding:20px 28px 36px;}
+    .outlook-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
+    .outlook-week{font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:4px 10px;border-radius:20px;}
+    .outlook-refresh{padding:5px 13px;border-radius:8px;font-size:12px;font-weight:600;border:1.5px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;}
+    .outlook-refresh:hover{background:var(--accent);color:#fff;}
+    .outlook-body{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px 32px;max-width:860px;line-height:1.8;font-size:14px;}
+    .outlook-body h1{font-size:20px;font-weight:700;margin:0 0 8px;}
+    .outlook-body h2{font-size:15px;font-weight:700;margin:22px 0 8px;color:var(--accent);}
+    .outlook-body p{margin:0 0 12px;}
+    .outlook-body ul,.outlook-body ol{margin:0 0 12px;padding-left:20px;}
+    .outlook-body li{margin-bottom:5px;}
+    .outlook-body blockquote{border-left:3px solid var(--accent);margin:0 0 12px;padding:6px 14px;color:var(--muted);font-style:italic;background:var(--card);border-radius:0 6px 6px 0;}
+    .outlook-empty{text-align:center;padding:60px 20px;color:var(--muted);}
+    .outlook-empty .big{font-size:40px;margin-bottom:12px;}
     .mkt-title{font-size:14px;font-weight:700;color:var(--muted);
       margin-bottom:16px;letter-spacing:.04em;}
     .mkt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;}
@@ -659,7 +674,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       #maintabs{padding:0 10px;}
       .mtab{padding:9px 11px;font-size:12px;}
       #fx-view{padding:14px 10px 28px;}
+      #outlook-view{padding:14px 10px 28px;}
+      .outlook-body{padding:18px 16px;}
       .mkt-grid{grid-template-columns:1fr 1fr;}
+      .mkt-card iframe{height:220px!important;}
+      .tradingview-widget-container{height:220px!important;}
     }
     #stats{display:grid;grid-template-columns:repeat(5,1fr);gap:11px;padding:18px 28px 0;}
     .sc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
@@ -823,6 +842,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div id="maintabs">
   <button class="mtab on" onclick="switchMainTab('news',this)">📰 News</button>
   <button class="mtab" onclick="switchMainTab('fx',this)">💱 FX</button>
+  <button class="mtab" onclick="switchMainTab('outlook',this)">🐟 AI Outlook</button>
 </div>
 <div class="translating-banner" id="trans-banner">
   <div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div>
@@ -875,6 +895,32 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="rng-btn"    onclick="setFXRange('3m',this)">3M</button>
   </div>
   <div class="mkt-grid" id="fx-grid"></div>
+</div>
+
+<div id="outlook-view">
+  <div class="outlook-header">
+    <span class="mkt-title" style="margin:0">🐟 AI Outlook</span>
+    <span class="outlook-week" id="outlook-week">Loading...</span>
+    <div style="flex:1"></div>
+    <button class="outlook-refresh" onclick="loadOutlook()">↻ Refresh</button>
+  </div>
+
+  <div class="outlook-body" style="margin-bottom:20px;max-width:860px;">
+    <h2 style="margin-top:0">🌍 Geopolitical Briefing — U.S. / Iran</h2>
+    <p>Based on the current geopolitical climate and the recent ultimatum issued by Trump to Iran, the following predictions can be made regarding the potential progression of the situation:</p>
+    <ol>
+      <li><strong>Increased Tensions:</strong> The ultimatum may escalate tensions between the U.S. and Iran, potentially leading to a more aggressive stance from both sides. Iran could respond with defiance or retaliatory actions, further straining relations.</li>
+      <li><strong>Military Mobilization:</strong> The U.S. might increase its military presence in the region as a show of force, which could provoke Iran to take more assertive actions, including military posturing or proxy engagements in neighboring countries.</li>
+      <li><strong>Diplomatic Efforts:</strong> There may be attempts from other nations to mediate and de-escalate the situation, especially from allies in the region who are concerned about the potential for conflict.</li>
+      <li><strong>Market Reactions:</strong> Financial markets, especially in energy and defense sectors, may react to the heightened uncertainty. Companies in these sectors could see increased volatility as investors respond to news and developments.</li>
+      <li><strong>Long-term Implications:</strong> If the situation escalates into conflict, it could have long-term implications for regional stability, global oil prices, and international relations, potentially drawing in other nations.</li>
+    </ol>
+    <p>Overall, the situation is fluid and developments will depend on the responses from both the U.S. and Iran, as well as the reactions from the international community. Investors and stakeholders should remain vigilant and monitor the situation closely.</p>
+  </div>
+
+  <div id="outlook-content">
+    <div class="outlook-empty"><div class="big">🐟</div>Fetching latest AI outlook...</div>
+  </div>
 </div>
 
 <div id="ov" onclick="if(event.target===this)closeMod()">
@@ -977,6 +1023,32 @@ async function setLang(lang, el){
   }
   document.querySelectorAll('.langbtn').forEach(b=>b.disabled=false);
   renderAll();renderSummaries();
+  if(_outlookLoaded) await refreshOutlookLang(lang);
+}
+
+let _outlookMdEn = '';
+async function refreshOutlookLang(lang){
+  if(!_outlookMdEn) return;
+  const content = document.getElementById('outlook-content');
+  if(lang === 'en'){
+    content.innerHTML = '<div class="outlook-body">' + mdToHtml(_outlookMdEn) + '</div>';
+    return;
+  }
+  const lines = _outlookMdEn.split('\n');
+  const GT_MAP = {'ko':'ko','zh':'zh-CN','es':'es'};
+  const tl = GT_MAP[lang] || lang;
+  const translated = await Promise.all(lines.map(async line => {
+    const t = line.trim();
+    if(!t) return line;
+    try {
+      const url = 'https://translate.googleapis.com/translate_a/single'
+        + '?client=gtx&sl=en&tl=' + tl + '&dt=t&q=' + encodeURIComponent(line.slice(0,500));
+      const r = await fetch(url);
+      const d = await r.json();
+      return (d[0]||[]).map(s=>s[0]||'').join('').trim() || line;
+    } catch { return line; }
+  }));
+  content.innerHTML = '<div class="outlook-body">' + mdToHtml(translated.join('\n')) + '</div>';
 }
 
 // ── THEME ENGINE ──────────────────────────────────────────────
@@ -1451,18 +1523,18 @@ function renderCandleCharts(){
 // ── Market tab data ──────────────────────────────────────────
 // Format: [displayName, "EXCHANGE:SYMBOL"]
 const FX_PAIRS = [
-  ['EUR / USD',  'FX:EURUSD'],
-  ['GBP / USD',  'FX:GBPUSD'],
-  ['USD / JPY',  'FX:USDJPY'],
-  ['USD / CHF',  'FX:USDCHF'],
-  ['AUD / USD',  'FX:AUDUSD'],
-  ['USD / CAD',  'FX:USDCAD'],
-  ['NZD / USD',  'FX:NZDUSD'],
-  ['USD / SEK',  'FX:USDSEK'],
-  ['USD / NOK',  'FX:USDNOK'],
-  ['USD / DKK',  'FX:USDDKK'],
-  ['USD / KRW',  'FX:USDKRW'],
-  ['USD / CNH',  'FX:USDCNH'],
+  ['EUR/USD',  'FX:EURUSD'],
+  ['GBP/USD',  'FX:GBPUSD'],
+  ['USD/JPY',  'FX:USDJPY'],
+  ['USD/CHF',  'FX:USDCHF'],
+  ['AUD/USD',  'FX:AUDUSD'],
+  ['USD/CAD',  'FX:USDCAD'],
+  ['NZD/USD',  'FX:NZDUSD'],
+  ['USD/SEK',  'FX:USDSEK'],
+  ['USD/NOK',  'FX:USDNOK'],
+  ['USD/DKK',  'FX:USDDKK'],
+  ['USD/KRW',  'FX:USDKRW'],
+  ['USD/CNH',  'FX:USDCNH'],
 ];
 
 // ── FX range state ───────────────────────────────────────────
@@ -1544,9 +1616,107 @@ function switchMainTab(tab, btn){
   newsEls.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display = isNews ? '' : 'none'; });
   document.getElementById('trans-banner').style.display = isNews ? '' : 'none';
   document.getElementById('fx-view').style.display = tab==='fx' ? 'block' : 'none';
+  document.getElementById('outlook-view').style.display = tab==='outlook' ? 'block' : 'none';
   if(tab==='fx'){
     const grid = document.getElementById('fx-grid');
     if(!grid.children.length) FX_PAIRS.forEach(p => grid.appendChild(buildTVChart(p)));
+  }
+  if(tab==='outlook') loadOutlook();
+}
+
+// ── AI Outlook (MiroFish) ─────────────────────────────────────
+let _outlookLoaded = false;
+function mdToHtml(md){
+  if(!md) return '';
+  return md
+    .replace(/^### (.+)$/gm,'<h3>$1</h3>')
+    .replace(/^## (.+)$/gm,'<h2>$1</h2>')
+    .replace(/^# (.+)$/gm,'<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/^> (.+)$/gm,'<blockquote>$1</blockquote>')
+    .replace(/^\d+\. (.+)$/gm,'<li>$1</li>')
+    .replace(/^[-*] (.+)$/gm,'<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, s => '<ul>'+s+'</ul>')
+    .replace(/\n\n/g,'</p><p>')
+    .replace(/^(?!<[hbul])/gm, '<p>')
+    .replace(/(?<![>])$/gm, '</p>')
+    .replace(/<p><\/p>/g,'')
+    .replace(/<p>(<[hbul])/g,'$1')
+    .replace(/(<\/[hbul][^>]*>)<\/p>/g,'$1');
+}
+async function translateChunkToEn(text){
+  if(!text || !text.trim()) return text;
+  try {
+    const url = 'https://translate.googleapis.com/translate_a/single'
+      + '?client=gtx&sl=auto&tl=en&dt=t&q=' + encodeURIComponent(text.slice(0, 1000));
+    const r = await fetch(url);
+    const d = await r.json();
+    return (d[0]||[]).map(s=>s[0]||'').join('').trim() || text;
+  } catch { return text; }
+}
+function fixMixedChinese(md){
+  // Replace common mixed-language conviction markers and brackets
+  return md
+    .replace(/（/g,'(').replace(/）/g,')')
+    .replace(/\s*-\s*高(\s|$)/g,' - High$1')
+    .replace(/\s*-\s*中(\s|$)/g,' - Medium$1')
+    .replace(/\s*-\s*低(\s|$)/g,' - Low$1')
+    .replace(/【/g,'[').replace(/】/g,']')
+    .replace(/：/g,': ').replace(/，/g,', ');
+}
+async function translateMdToEn(md){
+  md = fixMixedChinese(md);
+  // Split into lines, translate non-empty lines in batches
+  const lines = md.split('\n');
+  const translated = await Promise.all(lines.map(line => {
+    const t = line.trim();
+    if(!t || /^[-*#>|`]/.test(t) && t.length < 3) return Promise.resolve(line);
+    // Skip pure English / already English lines
+    if(/^[^\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]*$/.test(t)) return Promise.resolve(line);
+    return translateChunkToEn(line);
+  }));
+  return translated.join('\n');
+}
+async function loadOutlook(){
+  const content = document.getElementById('outlook-content');
+  const weekEl = document.getElementById('outlook-week');
+  try {
+    const listResp = await fetch('http://localhost:5001/api/report/list', {signal: AbortSignal.timeout(5000)});
+    if(!listResp.ok) throw new Error('no mirofish');
+    const listData = await listResp.json();
+    const reports = (listData.data || [])
+      .filter(r => r.status === 'completed' && r.markdown_content)
+      .sort((a,b) => new Date(b.completed_at||b.created_at) - new Date(a.completed_at||a.created_at));
+    if(!reports.length) throw new Error('no completed reports');
+    const rep = reports[0];
+    // Week label
+    const d = new Date(rep.completed_at || rep.created_at);
+    const weekStart = new Date(d); weekStart.setDate(d.getDate() - d.getDay() + 1);
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 4);
+    const fmt = dt => dt.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+    weekEl.textContent = 'Week of ' + fmt(weekStart) + ' – ' + fmt(weekEnd);
+    // Auto-translate if report contains non-Latin characters
+    let md = rep.markdown_content;
+    const hasCJK = /[\u4e00-\u9fff\uac00-\ud7af]/.test(md);
+    if(hasCJK){
+      weekEl.textContent += ' · Translating...';
+      md = await translateMdToEn(md);
+      weekEl.textContent = weekEl.textContent.replace(' · Translating...','');
+    }
+    _outlookMdEn = md;
+    if(currentLang !== 'en'){
+      await refreshOutlookLang(currentLang);
+    } else {
+      content.innerHTML = '<div class="outlook-body">' + mdToHtml(md) + '</div>';
+    }
+    _outlookLoaded = true;
+  } catch(e) {
+    weekEl.textContent = 'Not connected';
+    content.innerHTML = '<div class="outlook-empty"><div class="big">🐟</div>' +
+      '<strong>MiroFish not detected</strong><br><br>' +
+      'Start MiroFish locally and generate a report, then click ↻ Refresh.<br><br>' +
+      '<code style="font-size:11px;color:var(--muted)">cd ~/Documents/MiroFish && npm run dev</code></div>';
   }
 }
 
