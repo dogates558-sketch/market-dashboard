@@ -905,18 +905,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <button class="outlook-refresh" onclick="loadOutlook()">↻ Refresh</button>
   </div>
 
-  <div class="outlook-body" style="margin-bottom:20px;max-width:860px;">
-    <h2 style="margin-top:0">🌍 Geopolitical Briefing — U.S. / Iran</h2>
-    <p>Based on the current geopolitical climate and the recent ultimatum issued by Trump to Iran, the following predictions can be made regarding the potential progression of the situation:</p>
-    <ol>
-      <li><strong>Increased Tensions:</strong> The ultimatum may escalate tensions between the U.S. and Iran, potentially leading to a more aggressive stance from both sides. Iran could respond with defiance or retaliatory actions, further straining relations.</li>
-      <li><strong>Military Mobilization:</strong> The U.S. might increase its military presence in the region as a show of force, which could provoke Iran to take more assertive actions, including military posturing or proxy engagements in neighboring countries.</li>
-      <li><strong>Diplomatic Efforts:</strong> There may be attempts from other nations to mediate and de-escalate the situation, especially from allies in the region who are concerned about the potential for conflict.</li>
-      <li><strong>Market Reactions:</strong> Financial markets, especially in energy and defense sectors, may react to the heightened uncertainty. Companies in these sectors could see increased volatility as investors respond to news and developments.</li>
-      <li><strong>Long-term Implications:</strong> If the situation escalates into conflict, it could have long-term implications for regional stability, global oil prices, and international relations, potentially drawing in other nations.</li>
-    </ol>
-    <p>Overall, the situation is fluid and developments will depend on the responses from both the U.S. and Iran, as well as the reactions from the international community. Investors and stakeholders should remain vigilant and monitor the situation closely.</p>
-  </div>
+  <div id="geo-content" class="outlook-body" style="margin-bottom:20px;max-width:860px;"></div>
 
   <div id="outlook-content">
     <div class="outlook-empty"><div class="big">🐟</div>Fetching latest AI outlook...</div>
@@ -1026,20 +1015,94 @@ async function setLang(lang, el){
   if(_outlookLoaded) await refreshOutlookLang(lang);
 }
 
+// ── PASTE YOUR MIROFISH REPORT HERE (plain English markdown) ──────────────
+const STATIC_OUTLOOK_REPORT = `## Future Forecast Report: Market Response to Geopolitical Risks
+
+Significant price swings are expected in the consumer staples and energy sectors as institutional investors and retail traders turn to defensive stocks amid heightened geopolitical risks.
+
+---
+
+## Market Status and Trends
+
+Against the background of intensified geopolitical risks, market status and trends have shown significant changes. Investor sentiment has been affected, with institutional investors, retail traders and hedge funds reacting differently, and the overall market is tilting towards defensive assets.
+
+In the current market environment, institutional investors generally turn to defensive stocks, such as Coca-Cola (KO) and Procter & Gamble (PG), to cope with uncertainty. Analysts believe that these companies provide relatively stable investment options during economic fluctuations.
+
+At the same time, stocks in the energy sector, such as Exxon Mobil (XOM) and Chevron (CVX), have also become the focus of market attention and are expected to experience significant fluctuations due to changes in the geopolitical situation.
+
+### Investor Reaction
+
+- **Institutional Investors:** Tend to adjust portfolios and focus on defensive stocks to reduce risk.
+- **Retail Traders:** May follow the strategies of institutional investors and increase investment in consumer goods.
+- **Hedge Funds:** Focus on small-cap stocks like Radian Group (RDN) and Hovnanian Enterprises (HOV) as a strategy to fight inflation.
+
+### Expected Price Fluctuations (Next 1-5 Trading Days)
+
+- **Exxon Mobil (XOM)** - High: Expect greater market volatility due to geopolitical tensions.
+- **Chevron (CVX)** - High: Significant fluctuations expected; investors should monitor closely.
+- **Coca-Cola (KO)** - Medium: Defensive stock, expected to remain relatively stable.
+- **Procter & Gamble (PG)** - Medium: Consumer products giant likely to attract investor attention.
+- **Radian Group (RDN)** - Low: Small-cap opportunity amid volatility, but carries higher risk.
+
+---
+
+## Responses from Various Agents
+
+### Institutional Investors
+
+Institutional investors are actively adjusting their portfolios toward defensive stocks. MarketWatch noted that strategically shifting toward Coca-Cola and Procter & Gamble may provide greater safety as geopolitical tensions rise. The United Nations also recommended that institutional investors consider Coca-Cola as a safer investment option.
+
+### Retail Traders
+
+Retail traders are often influenced by institutional behavior and are beginning to follow their strategies. This bandwagon effect could lead to increased trading volume and price volatility in consumer staples in the short term.
+
+### Hedge Funds
+
+Hedge funds are displaying a more sophisticated strategy, looking for opportunities in small-cap stocks in addition to defensive positions. Radian Group (RDN) and Hovnanian Enterprises (HOV) are considered small-cap names that could perform well amid current economic uncertainty. One hedge fund manager noted: "We are focusing on small-cap stocks, especially companies that can survive in a high-inflation environment."
+
+---
+
+## Future Trends and Risks
+
+### Investor Sentiment and Market Dynamics
+
+As geopolitical tensions rise, institutional demand for defensive stocks will intensify, further driving prices higher. Retail bandwagon behavior may cause sharp increases in demand for consumer stocks, amplifying price volatility.
+
+Hedge funds will adopt diversified strategies, balancing defensive holdings with small-cap exposure, to remain flexible in volatile markets.
+
+### Price Outlook Summary
+
+- **Exxon Mobil (XOM)** - High: Greater volatility expected from geopolitical exposure.
+- **Chevron (CVX)** - High: Significant fluctuations anticipated; close monitoring required.
+- **Coca-Cola (KO)** - Medium: Defensive positioning; relative stability expected.
+- **Procter & Gamble (PG)** - Medium: Likely to attract safe-haven interest.
+- **Radian Group (RDN)** - Low: Small-cap upside potential with elevated risk.
+
+Overall, market trends in the coming days will be significantly shaped by investor behavior. Defensive stocks and selective small-cap names will be the focus. Investors should remain vigilant and monitor geopolitical developments and their downstream impact on energy and consumer sectors closely.`;
+// ─────────────────────────────────────────────────────────────────────────
+
+// Geopolitical briefing — stored as markdown so it can be translated
+const GEO_BRIEFING_EN = `## 🌍 Geopolitical Briefing — U.S. / Iran
+
+Based on the current geopolitical climate and the recent ultimatum issued by Trump to Iran, the following predictions can be made:
+
+1. **Increased Tensions:** The ultimatum may escalate tensions between the U.S. and Iran, potentially leading to a more aggressive stance from both sides. Iran could respond with defiance or retaliatory actions, further straining relations.
+
+2. **Military Mobilization:** The U.S. might increase its military presence in the region as a show of force, which could provoke Iran to take more assertive actions, including military posturing or proxy engagements in neighboring countries.
+
+3. **Diplomatic Efforts:** There may be attempts from other nations to mediate and de-escalate the situation, especially from allies in the region who are concerned about the potential for conflict.
+
+4. **Market Reactions:** Financial markets, especially in energy and defense sectors, may react to the heightened uncertainty. Companies in these sectors could see increased volatility as investors respond to news and developments.
+
+5. **Long-term Implications:** If the situation escalates into conflict, it could have long-term implications for regional stability, global oil prices, and international relations, potentially drawing in other nations.
+
+Overall, the situation is fluid and developments will depend on the responses from both the U.S. and Iran, as well as the reactions from the international community. Investors and stakeholders should remain vigilant and monitor the situation closely.`;
+
 let _outlookMdEn = '';
-async function refreshOutlookLang(lang){
-  if(!_outlookMdEn) return;
-  const content = document.getElementById('outlook-content');
-  if(lang === 'en'){
-    content.innerHTML = '<div class="outlook-body">' + mdToHtml(_outlookMdEn) + '</div>';
-    return;
-  }
-  const lines = _outlookMdEn.split('\n');
-  const GT_MAP = {'ko':'ko','zh':'zh-CN','es':'es'};
-  const tl = GT_MAP[lang] || lang;
-  const translated = await Promise.all(lines.map(async line => {
-    const t = line.trim();
-    if(!t) return line;
+
+async function _translateLines(lines, tl){
+  return Promise.all(lines.map(async line => {
+    if(!line.trim()) return line;
     try {
       const url = 'https://translate.googleapis.com/translate_a/single'
         + '?client=gtx&sl=en&tl=' + tl + '&dt=t&q=' + encodeURIComponent(line.slice(0,500));
@@ -1048,7 +1111,28 @@ async function refreshOutlookLang(lang){
       return (d[0]||[]).map(s=>s[0]||'').join('').trim() || line;
     } catch { return line; }
   }));
-  content.innerHTML = '<div class="outlook-body">' + mdToHtml(translated.join('\n')) + '</div>';
+}
+
+async function refreshOutlookLang(lang){
+  const geo = document.getElementById('geo-content');
+  const content = document.getElementById('outlook-content');
+  if(lang === 'en'){
+    if(geo) geo.innerHTML = mdToHtml(GEO_BRIEFING_EN);
+    if(_outlookMdEn) content.innerHTML = '<div class="outlook-body">' + mdToHtml(_outlookMdEn) + '</div>';
+    return;
+  }
+  const GT_MAP = {'ko':'ko','zh':'zh-CN','es':'es'};
+  const tl = GT_MAP[lang] || lang;
+  // translate geo briefing
+  if(geo){
+    const geoTranslated = await _translateLines(GEO_BRIEFING_EN.split('\n'), tl);
+    geo.innerHTML = mdToHtml(geoTranslated.join('\n'));
+  }
+  // translate report
+  if(_outlookMdEn){
+    const reportTranslated = await _translateLines(_outlookMdEn.split('\n'), tl);
+    content.innerHTML = '<div class="outlook-body">' + mdToHtml(reportTranslated.join('\n')) + '</div>';
+  }
 }
 
 // ── THEME ENGINE ──────────────────────────────────────────────
@@ -1681,43 +1765,33 @@ async function translateMdToEn(md){
 async function loadOutlook(){
   const content = document.getElementById('outlook-content');
   const weekEl = document.getElementById('outlook-week');
-  try {
-    const listResp = await fetch('http://localhost:5001/api/report/list', {signal: AbortSignal.timeout(5000)});
-    if(!listResp.ok) throw new Error('no mirofish');
-    const listData = await listResp.json();
-    const reports = (listData.data || [])
-      .filter(r => r.status === 'completed' && r.markdown_content)
-      .sort((a,b) => new Date(b.completed_at||b.created_at) - new Date(a.completed_at||a.created_at));
-    if(!reports.length) throw new Error('no completed reports');
-    const rep = reports[0];
-    // Week label
-    const d = new Date(rep.completed_at || rep.created_at);
-    const weekStart = new Date(d); weekStart.setDate(d.getDate() - d.getDay() + 1);
-    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 4);
-    const fmt = dt => dt.toLocaleDateString('en-US',{month:'short',day:'numeric'});
-    weekEl.textContent = 'Week of ' + fmt(weekStart) + ' – ' + fmt(weekEnd);
-    // Auto-translate if report contains non-Latin characters
-    let md = rep.markdown_content;
-    const hasCJK = /[\u4e00-\u9fff\uac00-\ud7af]/.test(md);
-    if(hasCJK){
-      weekEl.textContent += ' · Translating...';
-      md = await translateMdToEn(md);
-      weekEl.textContent = weekEl.textContent.replace(' · Translating...','');
-    }
-    _outlookMdEn = md;
-    if(currentLang !== 'en'){
-      await refreshOutlookLang(currentLang);
+  const geo = document.getElementById('geo-content');
+  // Render geo briefing in current language
+  if(geo){
+    if(currentLang === 'en'){
+      geo.innerHTML = mdToHtml(GEO_BRIEFING_EN);
     } else {
-      content.innerHTML = '<div class="outlook-body">' + mdToHtml(md) + '</div>';
+      await refreshOutlookLang(currentLang);
     }
-    _outlookLoaded = true;
-  } catch(e) {
-    weekEl.textContent = 'Not connected';
-    content.innerHTML = '<div class="outlook-empty"><div class="big">🐟</div>' +
-      '<strong>MiroFish not detected</strong><br><br>' +
-      'Start MiroFish locally and generate a report, then click ↻ Refresh.<br><br>' +
-      '<code style="font-size:11px;color:var(--muted)">cd ~/Documents/MiroFish && npm run dev</code></div>';
   }
+  // Render static MiroFish report
+  const md = STATIC_OUTLOOK_REPORT.trim();
+  if(!md){
+    weekEl.textContent = 'No report pasted';
+    content.innerHTML = '<div class="outlook-empty"><div class="big">🐟</div>' +
+      '<strong>Paste your MiroFish report</strong><br><br>' +
+      'Open <code>news-server.py</code>, find <code>STATIC_OUTLOOK_REPORT</code> and paste your report there.</div>';
+    _outlookLoaded = true;
+    return;
+  }
+  weekEl.textContent = 'Week of Apr 7 - Apr 11';
+  _outlookMdEn = md;
+  if(currentLang !== 'en'){
+    await refreshOutlookLang(currentLang);
+  } else {
+    content.innerHTML = '<div class="outlook-body">' + mdToHtml(md) + '</div>';
+  }
+  _outlookLoaded = true;
 }
 
 loadAll();
