@@ -635,6 +635,33 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     #fx-view{display:none;padding:20px 28px 36px;}
     /* ── AI Outlook view ── */
     #outlook-view{display:none;padding:20px 28px 36px;}
+    /* ── Calendar view ── */
+    #calendar-view{display:none;padding:20px 28px 36px;max-width:920px;}
+    .cal-week-title{font-size:18px;font-weight:700;margin-bottom:18px;color:var(--text);}
+    .cal-day{margin-bottom:20px;border-radius:12px;overflow:hidden;border:1px solid var(--border);}
+    .cal-day-header{padding:10px 16px;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px;}
+    .cal-day-header.today{background:#1a3a2a;color:#66bb6a;}
+    .cal-day-header.fomc{background:#3a1a1a;color:#ef5350;}
+    .cal-day-header.heavy{background:#1a2a3a;color:#4fc3f7;}
+    .cal-day-header.normal{background:var(--surface);color:var(--muted);}
+    .cal-day-header .day-badge{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600;margin-left:auto;}
+    .cal-day-header.fomc .day-badge{background:#ef5350;color:#fff;}
+    .cal-day-header.today .day-badge{background:#66bb6a;color:#fff;}
+    .cal-day-header.heavy .day-badge{background:#4fc3f7;color:#000;}
+    .cal-event{padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:12px;align-items:flex-start;}
+    .cal-event.done{opacity:0.45;}
+    .cal-event .evt-time{font-size:11px;color:var(--muted);min-width:62px;padding-top:2px;font-family:monospace;}
+    .cal-event .evt-body{flex:1;}
+    .cal-event .evt-name{font-size:13px;font-weight:600;color:var(--text);}
+    .cal-event .evt-meta{font-size:11px;color:var(--muted);margin-top:2px;}
+    .cal-event .evt-note{font-size:11px;color:#4fc3f7;margin-top:3px;font-style:italic;}
+    .cal-event .evt-tag{font-size:10px;padding:2px 7px;border-radius:8px;font-weight:700;white-space:nowrap;margin-top:2px;}
+    .tag-red{background:rgba(239,83,80,.15);color:#ef5350;border:1px solid rgba(239,83,80,.3);}
+    .tag-amber{background:rgba(255,193,7,.12);color:#ffc107;border:1px solid rgba(255,193,7,.3);}
+    .tag-teal{background:rgba(0,188,212,.12);color:#00bcd4;border:1px solid rgba(0,188,212,.3);}
+    .tag-purple{background:rgba(171,71,188,.15);color:#ab47bc;border:1px solid rgba(171,71,188,.3);}
+    .tag-gray{background:rgba(120,120,140,.12);color:var(--muted);border:1px solid var(--border);}
+    @media(max-width:600px){#calendar-view{padding:12px 10px 28px;}}
     .outlook-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
     .outlook-week{font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:4px 10px;border-radius:20px;}
     .outlook-refresh{padding:5px 13px;border-radius:8px;font-size:12px;font-weight:600;border:1.5px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;}
@@ -654,6 +681,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .mkt-card{background:var(--surface);border:1px solid var(--border);
       border-radius:var(--r);overflow:hidden;box-shadow:var(--sh);}
     .mkt-label{padding:8px 12px 0;font-size:11px;font-weight:700;color:var(--muted);}
+    .mkt-card-header{padding:9px 14px;font-size:13px;font-weight:700;color:var(--text);
+      border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;background:var(--surface);}
+    .mkt-card-header .pair-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;margin-left:auto;}
     /* Rates sub-tabs */
     .rates-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:18px;}
     .rates-stab{padding:6px 16px;border-radius:8px;font-size:12px;font-weight:600;
@@ -676,9 +706,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       #fx-view{padding:14px 10px 28px;}
       #outlook-view{padding:14px 10px 28px;}
       .outlook-body{padding:18px 16px;}
-      .mkt-grid{grid-template-columns:1fr 1fr;}
-      .mkt-card iframe{height:220px!important;}
-      .tradingview-widget-container{height:220px!important;}
+      .mkt-grid{grid-template-columns:1fr;}
+      .mkt-card iframe{height:200px!important;}
+      .tradingview-widget-container{height:200px!important;}
     }
     #stats{display:grid;grid-template-columns:repeat(5,1fr);gap:11px;padding:18px 28px 0;}
     .sc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
@@ -843,6 +873,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <button class="mtab on" onclick="switchMainTab('news',this)">📰 News</button>
   <button class="mtab" onclick="switchMainTab('fx',this)">💱 FX</button>
   <button class="mtab" onclick="switchMainTab('outlook',this)">🐟 AI Outlook</button>
+  <button class="mtab" onclick="switchMainTab('calendar',this)">📅 Calendar</button>
 </div>
 <div class="translating-banner" id="trans-banner">
   <div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div>
@@ -909,6 +940,209 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <div id="outlook-content">
     <div class="outlook-empty"><div class="big">🐟</div>Fetching latest AI outlook...</div>
+  </div>
+</div>
+
+<div id="calendar-view">
+  <div class="cal-week-title">📅 Economic Calendar — Week of Apr 24 · May 2, 2026</div>
+
+  <!-- FRIDAY APR 24 — TODAY (done) -->
+  <div class="cal-day">
+    <div class="cal-day-header today">Friday, April 25 <span style="color:var(--muted);font-weight:400;font-size:12px;margin-left:4px;">Apr 24</span><span class="day-badge">TODAY ✓</span></div>
+    <div class="cal-event done">
+      <div class="evt-time">8:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Durable Goods Orders (Mar)</div>
+        <div class="evt-meta">Prior: +0.9% · Released ✓</div>
+        <div class="evt-note">Proxy for business capex intentions; watch ex-transports</div>
+      </div>
+      <span class="evt-tag tag-amber">Medium</span>
+    </div>
+    <div class="cal-event done">
+      <div class="evt-time">10:00 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Michigan Sentiment — Final (Apr)</div>
+        <div class="evt-meta">Revised: 49.8 (prelim 47.6) · Released ✓</div>
+        <div class="evt-note">Lowest on record — Iran conflict drag on consumer morale; 1yr inflation expectations watched closely by Fed</div>
+      </div>
+      <span class="evt-tag tag-red">High</span>
+    </div>
+  </div>
+
+  <!-- MONDAY APR 28 — FOMC Day 1 -->
+  <div class="cal-day">
+    <div class="cal-day-header fomc">Monday, April 28<span class="day-badge">FOMC Day 1</span></div>
+    <div class="cal-event">
+      <div class="evt-time">All day</div>
+      <div class="evt-body">
+        <div class="evt-name">FOMC Meeting begins (Day 1 of 2)</div>
+        <div class="evt-meta">Fed in blackout — no Fed speaker appearances</div>
+        <div class="evt-note">Decision Wednesday Apr 30 at 2:00 PM ET</div>
+      </div>
+      <span class="evt-tag tag-purple">Fed</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">11:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Treasury Auction: 4-Week &amp; 8-Week Bills</div>
+        <div class="evt-meta">Settle Thu Apr 30</div>
+        <div class="evt-note">Short-end demand gauge; watch for stress vs. FOMC uncertainty</div>
+      </div>
+      <span class="evt-tag tag-teal">Auction</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">11:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Treasury Auction: 17-Week Bill</div>
+        <div class="evt-meta">Settle Wed Apr 29</div>
+      </div>
+      <span class="evt-tag tag-teal">Auction</span>
+    </div>
+  </div>
+
+  <!-- TUESDAY APR 29 — FOMC Decision -->
+  <div class="cal-day">
+    <div class="cal-day-header fomc">Tuesday, April 29<span class="day-badge">🔴 FOMC Decision</span></div>
+    <div class="cal-event">
+      <div class="evt-time">10:00 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Consumer Confidence (Apr) — Conference Board</div>
+        <div class="evt-meta">Prior: 91.8</div>
+        <div class="evt-note">Leading indicator for consumer spending; weakness here + low Michigan = stagflation narrative</div>
+      </div>
+      <span class="evt-tag tag-red">High</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">2:00 PM</div>
+      <div class="evt-body">
+        <div class="evt-name">FOMC Rate Decision</div>
+        <div class="evt-meta">Expected: Hold at current rate · Statement release</div>
+        <div class="evt-note">Watch for guidance changes on timing of cuts; dot plot language key amid geopolitical inflation risk</div>
+      </div>
+      <span class="evt-tag tag-purple">Fed 🔴</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">2:30 PM</div>
+      <div class="evt-body">
+        <div class="evt-name">Powell Press Conference</div>
+        <div class="evt-meta">Live Q&amp;A — high market sensitivity</div>
+        <div class="evt-note">Key: tone on Iran-driven energy inflation vs. growth slowdown — stagflation framing will move rates and USD</div>
+      </div>
+      <span class="evt-tag tag-purple">Fed 🔴</span>
+    </div>
+  </div>
+
+  <!-- WEDNESDAY APR 30 — TRIPLE RELEASE -->
+  <div class="cal-day">
+    <div class="cal-day-header heavy">Wednesday, April 30<span class="day-badge">⚡ Triple Release</span></div>
+    <div class="cal-event">
+      <div class="evt-time">8:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">GDP Advance Estimate — Q1 2026</div>
+        <div class="evt-meta">Prior (Q4 2025): +2.4% annualized · BEA</div>
+        <div class="evt-note">First look at Q1 growth; tariff/geopolitical drag expected — a miss here reignites recession fears and drives a bull-steepener in Treasuries</div>
+      </div>
+      <span class="evt-tag tag-red">High</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">8:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">PCE Price Index (Mar) + Personal Income &amp; Spending</div>
+        <div class="evt-meta">Prior core PCE: +2.8% YoY · Fed's preferred inflation gauge</div>
+        <div class="evt-note">Simultaneous GDP + PCE print is rare. A hot PCE + weak GDP = classic stagflation combo — most difficult scenario for the Fed</div>
+      </div>
+      <span class="evt-tag tag-red">High</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">8:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Employment Cost Index (ECI) — Q1 2026</div>
+        <div class="evt-meta">Prior (Q4 2025): +0.9% QoQ · BLS</div>
+        <div class="evt-note">Fed's preferred wage tracker — acceleration signals persistent services inflation and delays cuts</div>
+      </div>
+      <span class="evt-tag tag-red">High</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">11:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Treasury Auction: 13-Week &amp; 26-Week Bills</div>
+        <div class="evt-meta">Settle Mon May 4</div>
+        <div class="evt-note">Demand will be shaped by the morning data triple — watch bid-to-cover and tail</div>
+      </div>
+      <span class="evt-tag tag-teal">Auction</span>
+    </div>
+  </div>
+
+  <!-- THURSDAY MAY 1 -->
+  <div class="cal-day">
+    <div class="cal-day-header normal">Thursday, May 1</div>
+    <div class="cal-event">
+      <div class="evt-time">8:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Initial Jobless Claims (week ending Apr 26)</div>
+        <div class="evt-meta">Prior: ~220k</div>
+        <div class="evt-note">Weekly labor health check; spike above 240k would compound post-GDP growth fears</div>
+      </div>
+      <span class="evt-tag tag-amber">Medium</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">10:00 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">ISM Manufacturing PMI (Apr)</div>
+        <div class="evt-meta">Prior: 49.0 (contraction)</div>
+        <div class="evt-note">Sub-50 = contraction; prices-paid sub-index watched for supply-chain inflation signals</div>
+      </div>
+      <span class="evt-tag tag-red">High</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">10:00 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Construction Spending (Mar)</div>
+        <div class="evt-meta">Prior: -0.3%</div>
+      </div>
+      <span class="evt-tag tag-gray">Low</span>
+    </div>
+  </div>
+
+  <!-- FRIDAY MAY 2 — NFP -->
+  <div class="cal-day">
+    <div class="cal-day-header heavy">Friday, May 2<span class="day-badge">📊 Jobs Day</span></div>
+    <div class="cal-event">
+      <div class="evt-time">8:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Nonfarm Payrolls (Apr)</div>
+        <div class="evt-meta">Prior (Mar): +228k · Consensus: ~180k</div>
+        <div class="evt-note">If payrolls cool sharply (&lt;150k) AND unemployment rises, cuts become inevitable by June — dollar sell-off, front-end rally</div>
+      </div>
+      <span class="evt-tag tag-red">High</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">8:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Unemployment Rate (Apr)</div>
+        <div class="evt-meta">Prior: 4.2%</div>
+        <div class="evt-note">Sahm Rule trigger near 4.4% — any move higher will be amplified by markets</div>
+      </div>
+      <span class="evt-tag tag-red">High</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">8:30 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">Average Hourly Earnings (Apr)</div>
+        <div class="evt-meta">Prior: +3.8% YoY</div>
+        <div class="evt-note">Cross with PCE and ECI earlier in week — wage acceleration keeps Fed on hold even if jobs disappoint</div>
+      </div>
+      <span class="evt-tag tag-amber">Medium</span>
+    </div>
+    <div class="cal-event">
+      <div class="evt-time">10:00 AM</div>
+      <div class="evt-body">
+        <div class="evt-name">ISM Services PMI (Apr)</div>
+        <div class="evt-meta">Prior: 50.8</div>
+        <div class="evt-note">Services is the economy's backbone — a break below 50 alongside weak payrolls changes the rate outlook drastically</div>
+      </div>
+      <span class="evt-tag tag-red">High</span>
+    </div>
   </div>
 </div>
 
@@ -1635,16 +1869,16 @@ function buildTVChart(pair){
   const {dateRange} = FX_RANGE_CFG[_fxRange] || FX_RANGE_CFG['1d'];
   const cfg = {
     symbols: [[label, sym + '|1D']],
-    chartOnly: false,
+    chartOnly: true,
     width: '100%',
-    height: 280,
+    height: 240,
     locale: 'en',
     colorTheme: 'light',
     autosize: false,
     showVolume: false,
     showMA: false,
     hideDateRanges: true,
-    hideMarketStatus: false,
+    hideMarketStatus: true,
     hideSymbolLogo: true,
     scalePosition: 'right',
     scaleMode: 'Normal',
@@ -1663,9 +1897,14 @@ function buildTVChart(pair){
   };
   const wrap = document.createElement('div');
   wrap.className = 'mkt-card';
+  // Custom label header — always shows short pair name (EUR/USD etc.)
+  const header = document.createElement('div');
+  header.className = 'mkt-card-header';
+  header.innerHTML = label + '<span class="pair-dot"></span>';
+  wrap.appendChild(header);
   const container = document.createElement('div');
   container.className = 'tradingview-widget-container';
-  container.style.height = '280px';
+  container.style.height = '240px';
   const inner = document.createElement('div');
   inner.className = 'tradingview-widget-container__widget';
   inner.style.height = '100%';
@@ -1701,6 +1940,7 @@ function switchMainTab(tab, btn){
   document.getElementById('trans-banner').style.display = isNews ? '' : 'none';
   document.getElementById('fx-view').style.display = tab==='fx' ? 'block' : 'none';
   document.getElementById('outlook-view').style.display = tab==='outlook' ? 'block' : 'none';
+  document.getElementById('calendar-view').style.display = tab==='calendar' ? 'block' : 'none';
   if(tab==='fx'){
     const grid = document.getElementById('fx-grid');
     if(!grid.children.length) FX_PAIRS.forEach(p => grid.appendChild(buildTVChart(p)));
