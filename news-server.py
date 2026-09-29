@@ -649,6 +649,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .outlook-body ul,.outlook-body ol{margin:0 0 12px;padding-left:20px;}
     .outlook-body li{margin-bottom:5px;}
     .outlook-body blockquote{border-left:3px solid var(--accent);margin:0 0 12px;padding:6px 14px;color:var(--muted);font-style:italic;background:var(--card);border-radius:0 6px 6px 0;}
+    .md-table{border-collapse:collapse;margin:16px 0;font-size:13px;width:auto;}
+    .md-table th,.md-table td{border:1px solid var(--border);padding:7px 16px;text-align:left;}
+    .md-table th{background:var(--card);font-weight:600;color:var(--accent);}
+    .md-table tr:nth-child(even) td{background:var(--card);}
     .outlook-empty{text-align:center;padding:60px 20px;color:var(--muted);}
     .outlook-empty .big{font-size:40px;margin-bottom:12px;}
     .mkt-title{font-size:14px;font-weight:700;color:var(--muted);
@@ -1749,6 +1753,22 @@ function switchMainTab(tab, btn){
 // ── Markdown renderer ─────────────────────────────────────────
 function mdToHtml(md){
   if(!md) return '';
+  // Convert markdown tables first (before paragraph logic)
+  md = md.replace(/((?:^\|.+\|\n)+)/gm, tableBlock => {
+    const rows = tableBlock.trim().split('\n');
+    if(rows.length < 2) return tableBlock;
+    const isSep = r => /^\|[\s\-:|]+\|/.test(r);
+    let html = '<table class="md-table"><tbody>';
+    let isHead = true;
+    rows.forEach(row => {
+      if(isSep(row)){ isHead = false; return; }
+      const cells = row.replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
+      const tag = isHead ? 'th' : 'td';
+      html += '<tr>' + cells.map(c=>`<${tag}>${c}</${tag}>`).join('') + '</tr>';
+    });
+    html += '</tbody></table>';
+    return html;
+  });
   return md
     .replace(/^### (.+)$/gm,'<h3>$1</h3>')
     .replace(/^## (.+)$/gm,'<h2>$1</h2>')
@@ -1760,11 +1780,11 @@ function mdToHtml(md){
     .replace(/^[-*] (.+)$/gm,'<li>$1</li>')
     .replace(/(<li>.*<\/li>\n?)+/g, s => '<ul>'+s+'</ul>')
     .replace(/\n\n/g,'</p><p>')
-    .replace(/^(?!<[hbul])/gm, '<p>')
+    .replace(/^(?!<[hbulti])/gm, '<p>')
     .replace(/(?<![>])$/gm, '</p>')
     .replace(/<p><\/p>/g,'')
-    .replace(/<p>(<[hbul])/g,'$1')
-    .replace(/(<\/[hbul][^>]*>)<\/p>/g,'$1');
+    .replace(/<p>(<[hbulti])/g,'$1')
+    .replace(/(<\/[hbulti][^>]*>)<\/p>/g,'$1');
 }
 loadAll();
 </script>
