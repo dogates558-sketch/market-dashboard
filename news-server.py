@@ -633,16 +633,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     .mtab.on{color:var(--accent);border-bottom-color:var(--accent);}
     /* ── Market view ── */
     #fx-view{display:none;padding:20px 28px 36px;}
-    /* ── AI Outlook view ── */
-    #outlook-view{display:none;padding:20px 28px 36px;}
     /* ── Calendar view ── */
     #calendar-view{display:none;padding:20px 28px 36px;max-width:960px;}
     .cal-week-title{font-size:18px;font-weight:700;margin-bottom:18px;color:var(--text);}
     @media(max-width:600px){#calendar-view{padding:12px 10px 28px;}}
-    .outlook-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
-    .outlook-week{font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:4px 10px;border-radius:20px;}
-    .outlook-refresh{padding:5px 13px;border-radius:8px;font-size:12px;font-weight:600;border:1.5px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;}
-    .outlook-refresh:hover{background:var(--accent);color:#fff;}
+    /* ── My View ── */
+    #myview-view{display:none;padding:20px 28px 36px;}
+    .myview-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
+    .myview-date{font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:4px 10px;border-radius:20px;}
+    @media(max-width:600px){#myview-view{padding:14px 10px 28px;}}
     .outlook-body{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px 32px;max-width:860px;line-height:1.8;font-size:14px;}
     .outlook-body h1{font-size:20px;font-weight:700;margin:0 0 8px;}
     .outlook-body h2{font-size:15px;font-weight:700;margin:22px 0 8px;color:var(--accent);}
@@ -681,7 +680,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       #maintabs{padding:0 10px;}
       .mtab{padding:9px 11px;font-size:12px;}
       #fx-view{padding:14px 10px 28px;}
-      #outlook-view{padding:14px 10px 28px;}
       .outlook-body{padding:18px 16px;}
       .mkt-grid{grid-template-columns:1fr;}
       .mkt-card iframe{height:200px!important;}
@@ -849,8 +847,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div id="maintabs">
   <button class="mtab on" onclick="switchMainTab('news',this)">📰 News</button>
   <button class="mtab" onclick="switchMainTab('fx',this)">💱 FX</button>
-  <button class="mtab" onclick="switchMainTab('outlook',this)">🐟 AI Outlook</button>
   <button class="mtab" onclick="switchMainTab('calendar',this)">📅 Calendar</button>
+  <button class="mtab" onclick="switchMainTab('myview',this)">✍️ My View</button>
 </div>
 <div class="translating-banner" id="trans-banner">
   <div class="spin" style="width:14px;height:14px;border-width:2px;margin:0"></div>
@@ -905,21 +903,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="mkt-grid" id="fx-grid"></div>
 </div>
 
-<div id="outlook-view">
-  <div class="outlook-header">
-    <span class="mkt-title" style="margin:0">🐟 AI Outlook</span>
-    <span class="outlook-week" id="outlook-week">Loading...</span>
-    <div style="flex:1"></div>
-    <button class="outlook-refresh" onclick="loadOutlook()">↻ Refresh</button>
-  </div>
-
-  <div id="geo-content" class="outlook-body" style="margin-bottom:20px;max-width:860px;"></div>
-
-  <div id="outlook-content">
-    <div class="outlook-empty"><div class="big">🐟</div>Fetching latest AI outlook...</div>
-  </div>
-</div>
-
 <div id="calendar-view">
   <div class="cal-week-title">📅 Economic Calendar — Live · Auto-updating</div>
 
@@ -930,6 +913,19 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
   <div style="margin-top:8px;font-size:11px;color:var(--muted);text-align:right;">
     Real-time data via <a href="https://www.investing.com/" target="_blank" rel="nofollow" style="color:var(--accent);">Investing.com</a>
+  </div>
+</div>
+
+<div id="myview-view">
+  <div class="myview-header">
+    <span class="mkt-title" style="margin:0">✍️ My View</span>
+    <span class="myview-date" id="myview-date">—</span>
+  </div>
+  <div id="myview-content">
+    <div class="outlook-empty"><div class="big">✍️</div>
+      <strong>No view posted yet</strong><br><br>
+      Open <code>news-server.py</code>, find <code>STATIC_MY_VIEW</code> and paste your market commentary there.
+    </div>
   </div>
 </div>
 
@@ -1033,93 +1029,41 @@ async function setLang(lang, el){
   }
   document.querySelectorAll('.langbtn').forEach(b=>b.disabled=false);
   renderAll();renderSummaries();
-  if(_outlookLoaded) await refreshOutlookLang(lang);
+  if(_myViewLoaded && STATIC_MY_VIEW.trim()) await loadMyView();
 }
 
-// ── PASTE YOUR MIROFISH REPORT HERE (plain English markdown) ──────────────
-const STATIC_OUTLOOK_REPORT = `## Future Forecast Report: Market Response to Geopolitical Risks
-
-Significant price swings are expected in the consumer staples and energy sectors as institutional investors and retail traders turn to defensive stocks amid heightened geopolitical risks.
-
----
-
-## Market Status and Trends
-
-Against the background of intensified geopolitical risks, market status and trends have shown significant changes. Investor sentiment has been affected, with institutional investors, retail traders and hedge funds reacting differently, and the overall market is tilting towards defensive assets.
-
-In the current market environment, institutional investors generally turn to defensive stocks, such as Coca-Cola (KO) and Procter & Gamble (PG), to cope with uncertainty. Analysts believe that these companies provide relatively stable investment options during economic fluctuations.
-
-At the same time, stocks in the energy sector, such as Exxon Mobil (XOM) and Chevron (CVX), have also become the focus of market attention and are expected to experience significant fluctuations due to changes in the geopolitical situation.
-
-### Investor Reaction
-
-- **Institutional Investors:** Tend to adjust portfolios and focus on defensive stocks to reduce risk.
-- **Retail Traders:** May follow the strategies of institutional investors and increase investment in consumer goods.
-- **Hedge Funds:** Focus on small-cap stocks like Radian Group (RDN) and Hovnanian Enterprises (HOV) as a strategy to fight inflation.
-
-### Expected Price Fluctuations (Next 1-5 Trading Days)
-
-- **Exxon Mobil (XOM)** - High: Expect greater market volatility due to geopolitical tensions.
-- **Chevron (CVX)** - High: Significant fluctuations expected; investors should monitor closely.
-- **Coca-Cola (KO)** - Medium: Defensive stock, expected to remain relatively stable.
-- **Procter & Gamble (PG)** - Medium: Consumer products giant likely to attract investor attention.
-- **Radian Group (RDN)** - Low: Small-cap opportunity amid volatility, but carries higher risk.
-
----
-
-## Responses from Various Agents
-
-### Institutional Investors
-
-Institutional investors are actively adjusting their portfolios toward defensive stocks. MarketWatch noted that strategically shifting toward Coca-Cola and Procter & Gamble may provide greater safety as geopolitical tensions rise. The United Nations also recommended that institutional investors consider Coca-Cola as a safer investment option.
-
-### Retail Traders
-
-Retail traders are often influenced by institutional behavior and are beginning to follow their strategies. This bandwagon effect could lead to increased trading volume and price volatility in consumer staples in the short term.
-
-### Hedge Funds
-
-Hedge funds are displaying a more sophisticated strategy, looking for opportunities in small-cap stocks in addition to defensive positions. Radian Group (RDN) and Hovnanian Enterprises (HOV) are considered small-cap names that could perform well amid current economic uncertainty. One hedge fund manager noted: "We are focusing on small-cap stocks, especially companies that can survive in a high-inflation environment."
-
----
-
-## Future Trends and Risks
-
-### Investor Sentiment and Market Dynamics
-
-As geopolitical tensions rise, institutional demand for defensive stocks will intensify, further driving prices higher. Retail bandwagon behavior may cause sharp increases in demand for consumer stocks, amplifying price volatility.
-
-Hedge funds will adopt diversified strategies, balancing defensive holdings with small-cap exposure, to remain flexible in volatile markets.
-
-### Price Outlook Summary
-
-- **Exxon Mobil (XOM)** - High: Greater volatility expected from geopolitical exposure.
-- **Chevron (CVX)** - High: Significant fluctuations anticipated; close monitoring required.
-- **Coca-Cola (KO)** - Medium: Defensive positioning; relative stability expected.
-- **Procter & Gamble (PG)** - Medium: Likely to attract safe-haven interest.
-- **Radian Group (RDN)** - Low: Small-cap upside potential with elevated risk.
-
-Overall, market trends in the coming days will be significantly shaped by investor behavior. Defensive stocks and selective small-cap names will be the focus. Investors should remain vigilant and monitor geopolitical developments and their downstream impact on energy and consumer sectors closely.`;
+// ── PASTE YOUR MARKET VIEW HERE (plain English markdown) ─────────────────
+// DATE shown in the tab header — update this when you paste a new view
+const MY_VIEW_DATE = 'Sep 28, 2026';
+const STATIC_MY_VIEW = ``;
 // ─────────────────────────────────────────────────────────────────────────
 
-// Geopolitical briefing — stored as markdown so it can be translated
-const GEO_BRIEFING_EN = `## 🌍 Geopolitical Briefing — U.S. / Iran
-
-Based on the current geopolitical climate and the recent ultimatum issued by Trump to Iran, the following predictions can be made:
-
-1. **Increased Tensions:** The ultimatum may escalate tensions between the U.S. and Iran, potentially leading to a more aggressive stance from both sides. Iran could respond with defiance or retaliatory actions, further straining relations.
-
-2. **Military Mobilization:** The U.S. might increase its military presence in the region as a show of force, which could provoke Iran to take more assertive actions, including military posturing or proxy engagements in neighboring countries.
-
-3. **Diplomatic Efforts:** There may be attempts from other nations to mediate and de-escalate the situation, especially from allies in the region who are concerned about the potential for conflict.
-
-4. **Market Reactions:** Financial markets, especially in energy and defense sectors, may react to the heightened uncertainty. Companies in these sectors could see increased volatility as investors respond to news and developments.
-
-5. **Long-term Implications:** If the situation escalates into conflict, it could have long-term implications for regional stability, global oil prices, and international relations, potentially drawing in other nations.
-
-Overall, the situation is fluid and developments will depend on the responses from both the U.S. and Iran, as well as the reactions from the international community. Investors and stakeholders should remain vigilant and monitor the situation closely.`;
-
-let _outlookMdEn = '';
+let _myViewLoaded = false;
+let _myViewMdEn = '';
+async function loadMyView(){
+  const content = document.getElementById('myview-content');
+  const dateEl = document.getElementById('myview-date');
+  const md = STATIC_MY_VIEW.trim();
+  if(!md){
+    dateEl.textContent = '—';
+    content.innerHTML = '<div class="outlook-empty"><div class="big">✍️</div>' +
+      '<strong>No view posted yet</strong><br><br>' +
+      'Open <code>news-server.py</code>, find <code>STATIC_MY_VIEW</code> and paste your market commentary there.</div>';
+    _myViewLoaded = true;
+    return;
+  }
+  dateEl.textContent = MY_VIEW_DATE;
+  _myViewMdEn = md;
+  if(currentLang !== 'en'){
+    const GT_MAP = {'ko':'ko','zh':'zh-CN','es':'es'};
+    const tl = GT_MAP[currentLang] || currentLang;
+    const lines = await _translateLines(md.split('\n'), tl);
+    content.innerHTML = '<div class="outlook-body">' + mdToHtml(lines.join('\n')) + '</div>';
+  } else {
+    content.innerHTML = '<div class="outlook-body">' + mdToHtml(md) + '</div>';
+  }
+  _myViewLoaded = true;
+}
 
 async function _translateLines(lines, tl){
   return Promise.all(lines.map(async line => {
@@ -1132,28 +1076,6 @@ async function _translateLines(lines, tl){
       return (d[0]||[]).map(s=>s[0]||'').join('').trim() || line;
     } catch { return line; }
   }));
-}
-
-async function refreshOutlookLang(lang){
-  const geo = document.getElementById('geo-content');
-  const content = document.getElementById('outlook-content');
-  if(lang === 'en'){
-    if(geo) geo.innerHTML = mdToHtml(GEO_BRIEFING_EN);
-    if(_outlookMdEn) content.innerHTML = '<div class="outlook-body">' + mdToHtml(_outlookMdEn) + '</div>';
-    return;
-  }
-  const GT_MAP = {'ko':'ko','zh':'zh-CN','es':'es'};
-  const tl = GT_MAP[lang] || lang;
-  // translate geo briefing
-  if(geo){
-    const geoTranslated = await _translateLines(GEO_BRIEFING_EN.split('\n'), tl);
-    geo.innerHTML = mdToHtml(geoTranslated.join('\n'));
-  }
-  // translate report
-  if(_outlookMdEn){
-    const reportTranslated = await _translateLines(_outlookMdEn.split('\n'), tl);
-    content.innerHTML = '<div class="outlook-body">' + mdToHtml(reportTranslated.join('\n')) + '</div>';
-  }
 }
 
 // ── THEME ENGINE ──────────────────────────────────────────────
@@ -1726,17 +1648,16 @@ function switchMainTab(tab, btn){
   newsEls.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display = isNews ? '' : 'none'; });
   document.getElementById('trans-banner').style.display = isNews ? '' : 'none';
   document.getElementById('fx-view').style.display = tab==='fx' ? 'block' : 'none';
-  document.getElementById('outlook-view').style.display = tab==='outlook' ? 'block' : 'none';
   document.getElementById('calendar-view').style.display = tab==='calendar' ? 'block' : 'none';
+  document.getElementById('myview-view').style.display = tab==='myview' ? 'block' : 'none';
+  if(tab==='myview') loadMyView();
   if(tab==='fx'){
     const grid = document.getElementById('fx-grid');
     if(!grid.children.length) FX_PAIRS.forEach(p => grid.appendChild(buildTVChart(p)));
   }
-  if(tab==='outlook') loadOutlook();
 }
 
-// ── AI Outlook (MiroFish) ─────────────────────────────────────
-let _outlookLoaded = false;
+// ── Markdown renderer ─────────────────────────────────────────
 function mdToHtml(md){
   if(!md) return '';
   return md
@@ -1756,71 +1677,6 @@ function mdToHtml(md){
     .replace(/<p>(<[hbul])/g,'$1')
     .replace(/(<\/[hbul][^>]*>)<\/p>/g,'$1');
 }
-async function translateChunkToEn(text){
-  if(!text || !text.trim()) return text;
-  try {
-    const url = 'https://translate.googleapis.com/translate_a/single'
-      + '?client=gtx&sl=auto&tl=en&dt=t&q=' + encodeURIComponent(text.slice(0, 1000));
-    const r = await fetch(url);
-    const d = await r.json();
-    return (d[0]||[]).map(s=>s[0]||'').join('').trim() || text;
-  } catch { return text; }
-}
-function fixMixedChinese(md){
-  // Replace common mixed-language conviction markers and brackets
-  return md
-    .replace(/（/g,'(').replace(/）/g,')')
-    .replace(/\s*-\s*高(\s|$)/g,' - High$1')
-    .replace(/\s*-\s*中(\s|$)/g,' - Medium$1')
-    .replace(/\s*-\s*低(\s|$)/g,' - Low$1')
-    .replace(/【/g,'[').replace(/】/g,']')
-    .replace(/：/g,': ').replace(/，/g,', ');
-}
-async function translateMdToEn(md){
-  md = fixMixedChinese(md);
-  // Split into lines, translate non-empty lines in batches
-  const lines = md.split('\n');
-  const translated = await Promise.all(lines.map(line => {
-    const t = line.trim();
-    if(!t || /^[-*#>|`]/.test(t) && t.length < 3) return Promise.resolve(line);
-    // Skip pure English / already English lines
-    if(/^[^\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]*$/.test(t)) return Promise.resolve(line);
-    return translateChunkToEn(line);
-  }));
-  return translated.join('\n');
-}
-async function loadOutlook(){
-  const content = document.getElementById('outlook-content');
-  const weekEl = document.getElementById('outlook-week');
-  const geo = document.getElementById('geo-content');
-  // Render geo briefing in current language
-  if(geo){
-    if(currentLang === 'en'){
-      geo.innerHTML = mdToHtml(GEO_BRIEFING_EN);
-    } else {
-      await refreshOutlookLang(currentLang);
-    }
-  }
-  // Render static MiroFish report
-  const md = STATIC_OUTLOOK_REPORT.trim();
-  if(!md){
-    weekEl.textContent = 'No report pasted';
-    content.innerHTML = '<div class="outlook-empty"><div class="big">🐟</div>' +
-      '<strong>Paste your MiroFish report</strong><br><br>' +
-      'Open <code>news-server.py</code>, find <code>STATIC_OUTLOOK_REPORT</code> and paste your report there.</div>';
-    _outlookLoaded = true;
-    return;
-  }
-  weekEl.textContent = 'Week of Apr 7 - Apr 11';
-  _outlookMdEn = md;
-  if(currentLang !== 'en'){
-    await refreshOutlookLang(currentLang);
-  } else {
-    content.innerHTML = '<div class="outlook-body">' + mdToHtml(md) + '</div>';
-  }
-  _outlookLoaded = true;
-}
-
 loadAll();
 </script>
 </body>
