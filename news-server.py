@@ -336,6 +336,40 @@ def translate_headline(text, src_lang='ko'):
         pass
     return text  # fallback: return original
 
+# ── Translation for the browser (phones can't flood Google directly) ──
+_trans_cache = {}
+_trans_lock = threading.Lock()
+_trans_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+
+def translate_any(text, tl, sl='auto'):
+    """Translate one string, cached in memory. Returns original on failure."""
+    if not text or not text.strip():
+        return text
+    key = (sl, tl, text)
+    with _trans_lock:
+        if key in _trans_cache:
+            return _trans_cache[key]
+    try:
+        q = urllib.parse.quote(text[:500])
+        url = (f'https://translate.googleapis.com/translate_a/single'
+               f'?client=gtx&sl={sl}&tl={tl}&dt=t&q={q}')
+        req = urllib.request.Request(url, headers={'User-Agent': HEADERS['User-Agent']})
+        with urllib.request.urlopen(req, timeout=6, context=SSL_CTX) as r:
+            data = json.loads(r.read())
+        out = ''.join(seg[0] for seg in (data[0] or []) if seg[0]).strip()
+    except Exception:
+        return text            # don't cache failures, so they can retry later
+    if not out:
+        return text
+    with _trans_lock:
+        if len(_trans_cache) > 20000:
+            _trans_cache.clear()
+        _trans_cache[key] = out
+    return out
+
+def translate_batch(texts, tl, sl='auto'):
+    return list(_trans_pool.map(lambda t: translate_any(t, tl, sl), texts))
+
 def translate_rss_titles(raw, src_lang='ko'):
     """Translate all item <title> and <description> fields in parallel."""
     xml = raw.decode('utf-8', 'ignore')
@@ -950,21 +984,40 @@ let currentLang='en', transCache={};
 // Google Translate lang codes differ slightly from our internal codes
 const GT_LANG={'ko':'ko','zh':'zh-CN','es':'es','en':'en'};
 
+// All translation goes through our own server in small batches.
+// Phones choke when hundreds of requests go straight to Google at once.
+async function gtBatch(texts, tl, sl='auto'){
+  const out=[];
+  for(let i=0;i<texts.length;i+=25){
+    const chunk=texts.slice(i,i+25).map(t=>t.slice(0,500));
+    let res=chunk;
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        const ctrl=new AbortController();
+        const tid=setTimeout(()=>ctrl.abort(),30000);
+        const r=await fetch('/api/translate',{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({texts:chunk,tl,sl}),signal:ctrl.signal});
+        clearTimeout(tid);
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const d=await r.json();
+        if(Array.isArray(d.t)&&d.t.length===chunk.length){res=d.t;break;}
+      }catch(e){}
+    }
+    out.push(...res);
+  }
+  return out;
+}
+
 async function translateText(text, toLang){
   if(!text||toLang==='en') return text;
   const key=toLang+'|'+text;
   if(transCache[key]) return transCache[key];
   try{
     const tl=GT_LANG[toLang]||toLang;
-    const url='https://translate.googleapis.com/translate_a/single'
-      +'?client=gtx&sl=en&tl='+tl+'&dt=t&q='
-      +encodeURIComponent(text.slice(0,500));
-    const r=await fetch(url);
-    const d=await r.json();
-    // Response: [[[translated, original, ...], ...], ...]
-    const t=(d[0]||[]).map(seg=>seg[0]||'').join('').trim()||text;
-    transCache[key]=t;
-    return t;
+    const [t]=await gtBatch([text],tl,'auto');
+    if(t&&t!==text) transCache[key]=t;
+    return t||text;
   }catch{return text;}
 }
 
@@ -981,8 +1034,10 @@ async function translateAll(toLang){
       }
     }
   }
-  // Translate fully in parallel — Google Translate handles concurrency fine
-  await Promise.all([...toXlate].map(t=>translateText(t,toLang)));
+  const list=[...toXlate];
+  if(!list.length) return;
+  const res=await gtBatch(list,GT_LANG[toLang]||toLang,'auto');
+  list.forEach((t,i)=>{ if(res[i]&&res[i]!==t) transCache[toLang+'|'+t]=res[i]; });
 }
 
 function hasNonLatin(text){
@@ -1009,16 +1064,9 @@ async function autoTranslateNative(){
     });
   });
   if(!toXlate.size) return;
-  await Promise.all([...toXlate].map(async t=>{
-    try{
-      const url='https://translate.googleapis.com/translate_a/single'
-        +'?client=gtx&sl=auto&tl=en&dt=t&q='+encodeURIComponent(t.slice(0,500));
-      const r=await fetch(url);
-      const d=await r.json();
-      const translated=(d[0]||[]).map(seg=>seg[0]||'').join('').trim();
-      if(translated) transCache['en|'+t]=translated;
-    }catch(e){}
-  }));
+  const list=[...toXlate];
+  const res=await gtBatch(list,'en','auto');
+  list.forEach((t,i)=>{ if(res[i]&&res[i]!==t) transCache['en|'+t]=res[i]; });
   renderAll();renderSummaries();
 }
 
@@ -1159,16 +1207,13 @@ async function loadMyView(){
 }
 
 async function _translateLines(lines, tl){
-  return Promise.all(lines.map(async line => {
-    if(!line.trim() || /^\[\[CHART_\d+\]\]$/.test(line.trim())) return line;
-    try {
-      const url = 'https://translate.googleapis.com/translate_a/single'
-        + '?client=gtx&sl=en&tl=' + tl + '&dt=t&q=' + encodeURIComponent(line.slice(0,500));
-      const r = await fetch(url);
-      const d = await r.json();
-      return (d[0]||[]).map(s=>s[0]||'').join('').trim() || line;
-    } catch { return line; }
-  }));
+  const skip = l => !l.trim() || /^\[\[CHART_\d+\]\]$/.test(l.trim());
+  const idx = [];
+  lines.forEach((l,i)=>{ if(!skip(l)) idx.push(i); });
+  const res = await gtBatch(idx.map(i=>lines[i]), tl, 'en');
+  const out = lines.slice();
+  idx.forEach((i,k)=>{ out[i] = res[k] || lines[i]; });
+  return out;
 }
 
 // ── THEME ENGINE ──────────────────────────────────────────────
@@ -1845,8 +1890,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 print(f'  ❌  {url}  {e}')
                 self._err(500, str(e))
+        elif parsed.path == '/api/translate':
+            p = urllib.parse.parse_qs(parsed.query)
+            text = p.get('q', [''])[0]
+            tl = p.get('tl', ['en'])[0]
+            sl = p.get('sl', ['auto'])[0]
+            self._json({'t': translate_any(text, tl, sl)})
         else:
             self.send_error(404)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path != '/api/translate':
+            self.send_error(404); return
+        try:
+            n = int(self.headers.get('Content-Length', 0))
+            req = json.loads(self.rfile.read(n) or b'{}')
+            texts = [str(t) for t in (req.get('texts') or [])][:60]
+            tl = str(req.get('tl', 'en'))
+            sl = str(req.get('sl', 'auto'))
+            self._json({'t': translate_batch(texts, tl, sl)})
+        except Exception as e:
+            self._err(400, str(e))
+
+    def _json(self, obj):
+        body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _xml(self, raw):
         self.send_response(200)
@@ -1885,7 +1958,7 @@ if __name__ == '__main__':
 
     try:
         host = 'localhost' if IS_LOCAL else '0.0.0.0'
-        server = http.server.HTTPServer((host, PORT), Handler)
+        server = http.server.ThreadingHTTPServer((host, PORT), Handler)
     except OSError:
         print(f'\n❌  Port {PORT} already in use.')
         if IS_LOCAL:
