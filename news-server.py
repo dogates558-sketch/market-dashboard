@@ -399,10 +399,13 @@ def translate_rss_titles(raw, src_lang='ko'):
             # Strip HTML tags so Google Translate gets clean text
             originals.append(strip_tags(raw_text))
 
+        gt_lang = {'ko': 'ko', 'zh': 'zh-CN'}.get(src_lang, src_lang)
         def maybe_translate(text):
-            if text and needs_translation(text):
-                return translate_headline(text, src_lang)
-            return text
+            if not text:
+                return text
+            if src_lang in ('ko', 'zh', 'ja') and not needs_translation(text):
+                return text          # already English
+            return translate_any(text, 'en', gt_lang)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=15) as ex:
             translated = list(ex.map(maybe_translate, originals))
@@ -513,31 +516,37 @@ def scrape_headlines(raw, source_name, base_url):
     )
     return rss.encode('utf-8')
 
+def feed_language(raw):
+    """Read <language>es-ar</language> etc. from an RSS feed. Returns e.g. 'es' or None."""
+    m = re.search(rb'<language>\s*([A-Za-z]{2})', raw[:4000])
+    return m.group(1).decode().lower() if m else None
+
+def process_feed(src, url, raw):
+    """Turn a fetched page into English RSS: scrape HTML if needed, then translate
+    if the source is marked non-English or the feed declares a non-English language."""
+    if not is_rss(raw):
+        raw = scrape_headlines(raw, src['name'] if src else url.split('/')[2], url)
+        if b'<item>' not in raw:
+            raise Exception('No headlines found on page')
+    lang = (src or {}).get('translate')
+    if not lang:
+        fl = feed_language(raw)
+        if fl and fl != 'en':
+            lang = fl
+    if lang:
+        raw = translate_rss_titles(raw, lang)
+    return raw
+
+_URL_TO_SRC = {u: s for r in REGIONS for s in r['sources'] for u in s['urls']}
+
 def fetch_with_fallback(src):
     """Try each URL for a source until one works. Returns (url, raw) or raises.
     If the response is HTML (not RSS), scrape it for headlines and return RSS XML.
     If the source has 'translate', translate item titles to English."""
     last_err = None
-    lang = src.get('translate')  # e.g. 'ko'
     for url in src['urls']:
         try:
-            raw = fetch_url(url)
-            if is_rss(raw):
-                if lang:
-                    print(f"  🌐  {src['name']} translating titles ({lang}→en)…")
-                    raw = translate_rss_titles(raw, lang)
-                return url, raw
-            else:
-                # HTML page — scrape headlines and wrap as RSS
-                rss_raw = scrape_headlines(raw, src['name'], url)
-                if b'<item>' in rss_raw:
-                    if lang:
-                        print(f"  🌐  {src['name']} translating scraped titles ({lang}→en)…")
-                        rss_raw = translate_rss_titles(rss_raw, lang)
-                    print(f"  📰  {src['name']} (scraped HTML → {rss_raw.count(b'<item>')} items)")
-                    return url, rss_raw
-                else:
-                    last_err = Exception('No headlines found on page')
+            return url, process_feed(src, url, fetch_url(url))
         except Exception as e:
             last_err = e
     raise last_err or Exception('All URLs failed')
@@ -1041,7 +1050,7 @@ async function translateAll(toLang){
 }
 
 function hasNonLatin(text){
-  return text && /[\uAC00-\uD7A3\u3400-\u9FFF\u4E00-\u9FFF]/.test(text);
+  return text && /[\uAC00-\uD7A3\u3040-\u30FF\u3400-\u9FFF\u4E00-\u9FFF]/.test(text);
 }
 function getT(text){
   if(!text) return text;
@@ -1876,9 +1885,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._xml(cached); return
             # Otherwise fetch live
             try:
-                raw = fetch_url(url)
-                if not is_rss(raw):
-                    raw = scrape_headlines(raw, url.split('/')[2], url)
+                raw = process_feed(_URL_TO_SRC.get(url), url, fetch_url(url))
                 set_cached(url, raw)
                 self._xml(raw)
             except urllib.error.HTTPError as e:
