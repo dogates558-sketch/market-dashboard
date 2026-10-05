@@ -317,6 +317,30 @@ def needs_translation(text):
         for c in text
     )
 
+_FOREIGN_WORDS = set("""
+de del la las el los y que en por para con una un al es se su sus como más pero sobre tras ante hasta
+da das do dos nas nos na no em é e o os um uma com não ao à às pela pelo pelas pelos seu sua mais
+le les des du et est une dans pour pas sur au aux qui ce cette ses
+der die und das mit von zu den dem ist ein eine im für nicht auf bei
+il di che della dei delle nel nella per gli
+""".split())
+_ENGLISH_WORDS = set("the and of to in is for on with as at by from that this are was will its it be has have after over".split())
+_ACCENTS = set('áéíóúãõçñêâôàèìòùüäöß¿¡')
+
+def looks_foreign(text):
+    """Rough check for a Spanish/Portuguese/French/German/Italian headline."""
+    if not text:
+        return False
+    words = re.findall(r"[a-zA-Z\u00C0-\u00FF]+", text.lower())
+    if not words:
+        return False
+    f = sum(w in _FOREIGN_WORDS for w in words)
+    e = sum(w in _ENGLISH_WORDS for w in words)
+    accent = any(c in _ACCENTS for c in text.lower())
+    if e >= f:
+        return False
+    return f >= 2 or (accent and f >= 1)
+
 def translate_headline(text, src_lang='ko'):
     """Translate a single headline to English using the free MyMemory API."""
     try:
@@ -419,6 +443,11 @@ def translate_rss_titles(raw, src_lang='ko'):
         gt_lang = {'ko': 'ko', 'zh': 'zh-CN'}.get(src_lang, src_lang)
         def maybe_translate(text):
             if not text:
+                return text
+            if src_lang == 'auto':
+                # English feed: only translate the odd foreign item
+                if needs_translation(text) or looks_foreign(text):
+                    return translate_any(text, 'en', 'auto')
                 return text
             if src_lang in ('ko', 'zh', 'ja') and not needs_translation(text):
                 return text          # already English
@@ -552,6 +581,13 @@ def process_feed(src, url, raw):
             lang = fl
     if lang:
         raw = translate_rss_titles(raw, lang)
+    else:
+        # English feed — check for stray foreign-language items (e.g. Bloomberg Línea)
+        txt = raw.decode('utf-8', 'ignore')
+        fields = re.findall(r'<(?:title|description)>(.*?)</(?:title|description)>', txt, re.DOTALL)
+        if any(needs_translation(f) or looks_foreign(re.sub(r'<[^>]+>|<!\[CDATA\[|\]\]>', ' ', f))
+               for f in fields):
+            raw = translate_rss_titles(raw, 'auto')
     return raw
 
 _URL_TO_SRC = {u: s for r in REGIONS for s in r['sources'] for u in s['urls']}
@@ -1037,7 +1073,7 @@ async function gtBatch(texts, tl, sl='auto'){
   const todo=[];
   out.forEach((t,i)=>{
     const src=texts[i];
-    if(t===src && src && src.trim() && (tl!=='en' || hasNonLatin(src))) todo.push(i);
+    if(t===src && src && src.trim() && (tl!=='en' || needsEnglish(src))) todo.push(i);
   });
   let k=0;
   await Promise.all(Array.from({length:Math.min(4,todo.length)},async()=>{
@@ -1089,6 +1125,20 @@ async function translateAll(toLang){
   list.forEach((t,i)=>{ if(res[i]&&res[i]!==t) transCache[toLang+'|'+t]=res[i]; });
 }
 
+const _FW=new Set(`de del la las el los y que en por para con una un al es se su sus como más pero sobre tras ante hasta
+da das do dos nas nos na no em é e o os um uma com não ao à às pela pelo pelas pelos seu sua mais
+le les des du et est une dans pour pas sur au aux qui ce cette ses
+der die und das mit von zu den dem ist ein eine im für nicht auf bei
+il di che della dei delle nel nella per gli`.split(/\s+/));
+const _EW=new Set('the and of to in is for on with as at by from that this are was will its it be has have after over'.split(' '));
+function looksForeign(text){
+  if(!text) return false;
+  const w=(text.toLowerCase().match(/[a-z\u00C0-\u00FF]+/g))||[];
+  let f=0,e=0; w.forEach(x=>{ if(_FW.has(x)) f++; if(_EW.has(x)) e++; });
+  if(e>=f) return false;
+  return f>=2 || (/[áéíóúãõçñêâôàèìòùüäöß¿¡]/i.test(text) && f>=1);
+}
+function needsEnglish(text){ return hasNonLatin(text)||looksForeign(text); }
 function hasNonLatin(text){
   return text && /[\uAC00-\uD7A3\u3040-\u30FF\u3400-\u9FFF\u4E00-\u9FFF]/.test(text);
 }
@@ -1096,7 +1146,7 @@ function getT(text){
   if(!text) return text;
   if(currentLang==='en'){
     // If text is Korean/Chinese and we have a cached English translation, use it
-    if(hasNonLatin(text)) return transCache['en|'+text]||text;
+    if(needsEnglish(text)) return transCache['en|'+text]||text;
     return text;
   }
   return transCache[currentLang+'|'+text]||text;
@@ -1107,8 +1157,8 @@ async function autoTranslateNative(){
   REGIONS.forEach(r=>{
     Object.values(data[r.id]||{}).forEach(sd=>{
       (sd.articles||[]).forEach(a=>{
-        if(hasNonLatin(a.title)&&!transCache['en|'+a.title]) toXlate.add(a.title);
-        if(a.description&&hasNonLatin(a.description)&&!transCache['en|'+a.description]) toXlate.add(a.description);
+        if(needsEnglish(a.title)&&!transCache['en|'+a.title]) toXlate.add(a.title);
+        if(a.description&&needsEnglish(a.description)&&!transCache['en|'+a.description]) toXlate.add(a.description);
       });
     });
   });
