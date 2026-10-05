@@ -322,16 +322,7 @@ def translate_headline(text, src_lang='ko'):
     try:
         # Google Translate unofficial API — no key, no daily limit
         gt_lang = {'ko': 'ko', 'zh': 'zh-CN'}.get(src_lang, src_lang)
-        q = urllib.parse.quote(text[:500])
-        url = (f'https://translate.googleapis.com/translate_a/single'
-               f'?client=gtx&sl={gt_lang}&tl=en&dt=t&q={q}')
-        req = urllib.request.Request(url, headers={'User-Agent': HEADERS['User-Agent']})
-        with urllib.request.urlopen(req, timeout=6, context=SSL_CTX) as resp:
-            data = json.loads(resp.read())
-        # Response: [[[translated, original, ...], ...], ...]
-        translated = ''.join(seg[0] for seg in (data[0] or []) if seg[0]).strip()
-        if translated:
-            return translated
+        return translate_any(text, 'en', gt_lang)
     except Exception:
         pass
     return text  # fallback: return original
@@ -349,23 +340,49 @@ def translate_any(text, tl, sl='auto'):
     with _trans_lock:
         if key in _trans_cache:
             return _trans_cache[key]
-    try:
-        q = urllib.parse.quote(text[:500])
-        url = (f'https://translate.googleapis.com/translate_a/single'
-               f'?client=gtx&sl={sl}&tl={tl}&dt=t&q={q}')
-        req = urllib.request.Request(url, headers={'User-Agent': HEADERS['User-Agent']})
-        with urllib.request.urlopen(req, timeout=6, context=SSL_CTX) as r:
-            data = json.loads(r.read())
-        out = ''.join(seg[0] for seg in (data[0] or []) if seg[0]).strip()
-    except Exception:
+    out = _google_translate(text[:500], tl, sl)
+    if not out or out == text:
         return text            # don't cache failures, so they can retry later
-    if not out:
-        return text
     with _trans_lock:
         if len(_trans_cache) > 20000:
             _trans_cache.clear()
         _trans_cache[key] = out
     return out
+
+_trans_last_err = {'msg': None, 'ts': 0}
+
+def _parse_gtx(data):
+    return ''.join(seg[0] for seg in (data[0] or []) if seg and seg[0]).strip()
+
+def _parse_clients5(data):
+    # [["translated","ko"]] or ["translated"] depending on version
+    first = data[0] if isinstance(data, list) and data else data
+    if isinstance(first, list):
+        first = first[0]
+    return str(first or '').strip()
+
+_GT_ENDPOINTS = [
+    ('https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl={sl}&tl={tl}&q={q}', _parse_gtx),
+    ('https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl={sl}&tl={tl}&q={q}', _parse_clients5),
+    ('https://translate.google.com/translate_a/single?client=gtx&dt=t&sl={sl}&tl={tl}&q={q}', _parse_gtx),
+]
+
+def _google_translate(text, tl, sl):
+    """Try several Google endpoints; cloud servers often get blocked on one of them."""
+    q = urllib.parse.quote(text)
+    for tmpl, parse in _GT_ENDPOINTS:
+        url = tmpl.format(sl=sl, tl=tl, q=q)
+        try:
+            req = urllib.request.Request(url, headers={
+                'User-Agent': HEADERS['User-Agent'], 'Accept': '*/*'})
+            with urllib.request.urlopen(req, timeout=6, context=SSL_CTX) as r:
+                out = parse(json.loads(r.read().decode('utf-8')))
+            if out:
+                return out
+        except Exception as e:
+            _trans_last_err['msg'] = f'{url.split("/")[2]}: {e}'
+            _trans_last_err['ts'] = time.time()
+    return None
 
 def translate_batch(texts, tl, sl='auto'):
     return list(_trans_pool.map(lambda t: translate_any(t, tl, sl), texts))
@@ -1015,6 +1032,29 @@ async function gtBatch(texts, tl, sl='auto'){
     }
     out.push(...res);
   }
+  // Anything the server couldn't translate: ask Google from the browser,
+  // 4 at a time so phones don't choke.
+  const todo=[];
+  out.forEach((t,i)=>{
+    const src=texts[i];
+    if(t===src && src && src.trim() && (tl!=='en' || hasNonLatin(src))) todo.push(i);
+  });
+  let k=0;
+  await Promise.all(Array.from({length:Math.min(4,todo.length)},async()=>{
+    while(k<todo.length){
+      const i=todo[k++];
+      try{
+        const ctrl=new AbortController();
+        const tid=setTimeout(()=>ctrl.abort(),10000);
+        const r=await fetch('https://translate.googleapis.com/translate_a/single?client=gtx&dt=t'
+          +'&sl='+sl+'&tl='+tl+'&q='+encodeURIComponent(texts[i].slice(0,500)),{signal:ctrl.signal});
+        clearTimeout(tid);
+        const d=await r.json();
+        const t=(d[0]||[]).map(seg=>seg[0]||'').join('').trim();
+        if(t) out[i]=t;
+      }catch(e){}
+    }
+  }));
   return out;
 }
 
@@ -1083,6 +1123,8 @@ async function setLang(lang, el){
   document.querySelectorAll('.langbtn').forEach(b=>{b.classList.remove('on');b.disabled=true;});
   el.classList.add('on');
   currentLang=lang;
+  // Start My View right away (don't make it wait behind all the headlines)
+  const mv = (_myViewLoaded && STATIC_MY_VIEW.trim()) ? loadMyView() : null;
   if(lang!=='en'){
     document.getElementById('trans-banner').classList.add('show');
     await translateAll(lang);
@@ -1090,7 +1132,7 @@ async function setLang(lang, el){
   }
   document.querySelectorAll('.langbtn').forEach(b=>b.disabled=false);
   renderAll();renderSummaries();
-  if(_myViewLoaded && STATIC_MY_VIEW.trim()){ _myViewLoaded=false; await loadMyView(); }
+  if(mv) await mv;
 }
 
 // ── PASTE YOUR MARKET VIEW HERE (plain English markdown) ─────────────────
@@ -1181,6 +1223,7 @@ const CHART_IMGS = [
 ];
 let _myViewLoaded = false;
 let _myViewMdEn = '';
+const _myViewHtml = {};   // lang -> translated html, so it's only translated once
 async function loadMyView(){
   const container = document.getElementById('myview-content');
   const dateEl = document.getElementById('myview-date');
@@ -1195,12 +1238,24 @@ async function loadMyView(){
   }
   dateEl.textContent = MY_VIEW_DATE;
   _myViewMdEn = md;
-  let html;
-  if(currentLang !== 'en'){
+  const lang = currentLang;
+  if(_myViewHtml[lang]){
+    container.innerHTML = _myViewHtml[lang];
+    _myViewLoaded = true;
+    return;
+  }
+  let html, translated = (lang === 'en');
+  if(lang !== 'en'){
+    container.innerHTML = '<div class="loading"><div class="spin"></div>'
+      + '<p>' + ({ko:'번역 중…',zh:'翻译中…',es:'Traduciendo…'}[lang]||'Translating…') + '</p></div>';
     const GT_MAP = {'ko':'ko','zh':'zh-CN','es':'es'};
-    const tl = GT_MAP[currentLang] || currentLang;
-    const lines = await _translateLines(md.split('\n'), tl);
-    html = mdToHtml(lines.join('\n'));
+    const tl = GT_MAP[lang] || lang;
+    const orig = md.split('\n');
+    const lines = await _translateLines(orig, tl);
+    if(currentLang !== lang) return;   // user switched language meanwhile
+    translated = lines.some((l,i)=>l!==orig[i]);
+    // Google sometimes adds spaces inside **bold** markers; tidy them up
+    html = mdToHtml(lines.join('\n').replace(/\*\* +([^*]+?) +\*\*/g,'**$1**'));
   } else {
     html = mdToHtml(md);
   }
@@ -1212,6 +1267,8 @@ async function loadMyView(){
     );
   });
   container.innerHTML = '<div class="outlook-body">' + html + '</div>';
+  // Only cache if translation actually happened (not an English fallback)
+  if(translated) _myViewHtml[lang] = container.innerHTML;
   _myViewLoaded = true;
 }
 
@@ -1219,9 +1276,12 @@ async function _translateLines(lines, tl){
   const skip = l => !l.trim() || /^\[\[CHART_\d+\]\]$/.test(l.trim());
   const idx = [];
   lines.forEach((l,i)=>{ if(!skip(l)) idx.push(i); });
-  const res = await gtBatch(idx.map(i=>lines[i]), tl, 'en');
+  // Keep markdown markers (#, -, 1., >) out of the translation and put them back after
+  const pre = /^(\s*(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s*)?)([\s\S]*)$/;
+  const parts = idx.map(i=>lines[i].match(pre));
+  const res = await gtBatch(parts.map(m=>m[2]), tl, 'en');
   const out = lines.slice();
-  idx.forEach((i,k)=>{ out[i] = res[k] || lines[i]; });
+  idx.forEach((i,k)=>{ out[i] = parts[k][1] + (res[k] || parts[k][2]); });
   return out;
 }
 
@@ -1902,7 +1962,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             text = p.get('q', [''])[0]
             tl = p.get('tl', ['en'])[0]
             sl = p.get('sl', ['auto'])[0]
-            self._json({'t': translate_any(text, tl, sl)})
+            res = {'t': translate_any(text, tl, sl)}
+            if 'debug' in p:
+                res['last_error'] = _trans_last_err['msg']
+                res['cached'] = len(_trans_cache)
+            self._json(res)
         else:
             self.send_error(404)
 
