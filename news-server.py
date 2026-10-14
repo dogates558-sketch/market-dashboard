@@ -667,10 +667,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       .outlook-body img{border-radius:6px;margin:12px 0;}
     }
     .post-title{font-size:16px;font-weight:700;color:var(--text);}
-    .md-table{border-collapse:collapse;margin:16px 0;font-size:13px;width:auto;}
-    .md-table th,.md-table td{border:1px solid var(--border);padding:7px 16px;text-align:left;}
+    .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:16px 0;}
+    .md-table{border-collapse:collapse;font-size:13px;width:100%;white-space:nowrap;}
+    .md-table th,.md-table td{border:1px solid var(--border);padding:7px 14px;text-align:left;}
     .md-table th{background:var(--card);font-weight:600;color:var(--accent);}
     .md-table tr:nth-child(even) td{background:var(--card);}
+    @media(max-width:600px){.md-table{font-size:12px;}.md-table th,.md-table td{padding:5px 8px;}}
     .mkt-title{font-size:14px;font-weight:700;color:var(--muted);
       margin-bottom:16px;letter-spacing:.04em;}
     .mkt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;}
@@ -942,9 +944,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <span class="myview-date" id="myview-date">—</span>
   </div>
   <div id="myview-feed"></div>
-      <strong>No view posted yet</strong><br><br>
-      Open <code>news-server.py</code> and set <code>PDF_MY_VIEW</code> to embed your PDF.
-    </div>
   </div>
 </div>
 
@@ -1711,7 +1710,7 @@ function mdToHtml(md){
     const rows = tableBlock.trim().split('\n');
     if(rows.length < 2) return tableBlock;
     const isSep = r => /^\|[\s\-:|]+\|/.test(r);
-    let html = '<table class="md-table"><tbody>';
+    let html = '<div class="table-wrap"><table class="md-table"><tbody>';
     let isHead = true;
     rows.forEach(row => {
       if(isSep(row)){ isHead = false; return; }
@@ -1719,7 +1718,7 @@ function mdToHtml(md){
       const tag = isHead ? 'th' : 'td';
       html += '<tr>' + cells.map(c=>`<${tag}>${c}</${tag}>`).join('') + '</tr>';
     });
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     return html;
   });
   return md
